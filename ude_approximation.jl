@@ -10,13 +10,11 @@ begin
 	using OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
 	
 	# Standard Libraries
-	using Statistics,ComponentArrays
+	using Statistics, ComponentArrays
 	
 	# External Libraries
-	using Lux, Zygote, Plots, StableRNGs, DataFrames, CSV
+	using Lux, Zygote, Plots, StableRNGs, DataFrames, CSV, SymPy
 
-	#  LinearAlgebra,
-	
 	# Explicitly call the default backend for Plots
 	gr()
 	
@@ -34,62 +32,56 @@ md"""
 ##### Define the variable parameters of the ODE (pulse duration, frequency, GF concentration)
 """
 
-# ╔═╡ 653a4726-2394-41fc-b052-a993f0aa7ec3
-begin
-	# Name file to save the results according to parameters used
-	filename = "./Data/egf_lowCC_10m_3pulse"
-	
-	# Choose GF and concentration
-	GF = "EGF"
-	CC_high = false
-end
-
 # ╔═╡ 6b90847e-3162-45aa-9f12-f0c266a4f4ed
-begin
+function set_model_hyperparameters(GF, CC)
 	if GF == "EGF"
 		GF_PFB = 0
-		if CC_high
+		if CC == "high"
 			GF_concentration = 25
 		else
 			GF_concentration = 1
 		end
 	else
 		GF_PFB = 0.75
-		if CC_high
+		if CC == "high"
 			GF_concentration = 50
 		else
 			GF_concentration = 2
 		end
 	end
+	return GF_PFB, GF_concentration
 end
 
-# ╔═╡ f469acd4-cf1a-4c82-a692-d3291342136f
-# ╠═╡ disabled = true
-#=╠═╡
+# ╔═╡ 653a4726-2394-41fc-b052-a993f0aa7ec3
 begin
-	#@variables t k(t)
+	# Name file to save the results according to parameters used
+	filename = "ngf_lowCC_3m_3v"
+	
+	# Choose GF and concentration
+	GF = "NGF"
+	CC = "low"
+	GF_PFB, GF_concentration = set_model_hyperparameters(GF, CC)
 
-	function f(t, pulse_frequency)
-		k = 0
-		for i in range(1, step=1, stop=div(100,  pulse_frequency))
-			global k = k + 100*(t-(i*10))/2 - 100*(t-(i+1)*10)/2
-		end
-		
-	#@syms k(t)
-	#@register_symbolic 
+	# Set signal function parameters
+	pulse_duration=3
+	pulse_frequency=3
+
+	# Define symbolic variables
+	#t, i = symbols("t i")
+	
+	# Define the function
+	f_signal(t) = sum(tanh(100(t - i))/2 - tanh(100(t - (i + pulse_duration))) / 2 for i in range(0, stop=100, step=(pulse_frequency + pulse_duration)))
+	
+	# Register the symbolic function
+	@register_symbolic f_signal(t)
+	
 end
-  ╠═╡ =#
 
-# ╔═╡ 5663563b-4ab7-46c0-bcba-efb9c0281dd4
+# ╔═╡ e6644339-6295-497e-8632-86f1a77c7574
 begin
-	pulse_frequency = 100
-	pulse_duration = 10
-	
-	signal_f(t) = (tanh(100*(t))/2 - tanh(100*(t-10))/2 +
-				   tanh(100*(t-20))/2 - tanh(100*(t-30))/2 +
-				   tanh(100*(t-40))/2 - tanh(100*(t-50))/2) 
-	
-	@register_symbolic signal_f(t)
+	# Visualise the signal function
+	x = LinRange(0, 100, 1000)
+	plot(x, f_signal.(x), xlabel="Time [min]", ylabel="Signal", title="Light signal function", label="")
 end
 
 # ╔═╡ fd44b9dd-a48a-48e9-809a-52ecf8df38a1
@@ -99,6 +91,7 @@ md"""
 
 # ╔═╡ 465048dc-b288-4578-88f7-76011fff7626
 function erk_dynamics!(du, u, p, t)
+	
 	## PARAMETERS
     k_R, kd_R, GF = p[1:3]    											   # Receptor 
 	k_Ras, kd_Ras, Km_Ras, Km_aRas, GAP = p[4:8]   							# Ras
@@ -110,7 +103,7 @@ function erk_dynamics!(du, u, p, t)
 
 	## EQUATIONS
 	# Receptor equation
-    du[1] = k_R * (1-u[1]) * GF * signal_f(t) - kd_R * u[1]
+    du[1] = k_R * (1-u[1]) * GF * f_signal(t) - kd_R * u[1]
 
 	# Ras equation
     du[2] = (k_Ras * u[1] * (1-u[2]) / (Km_Ras + (1-u[2])) - 
@@ -165,16 +158,16 @@ begin
 	X = solve(prob, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
 	
 	# Add noise in terms of the mean
-	x_ERK = Array(X)[4,begin:10:end]
+	x_ERK = Array(X)[5,begin:10:end]
 	time = X.t[begin:10:end]
 	
 	x̄_ERK = mean(x_ERK, dims = 1)
 	noise_magnitude = 5e-3
 	xₙ_ERK = abs.(x_ERK .+ (noise_magnitude * x̄_ERK) .* randn(rng, eltype(x_ERK), size(x_ERK)))
 	
-	plot(X, alpha = 0.75, color = :red, 
-		label = "Ground truth $(GF)", idxs=4)
-	scatter!(time, xₙ_ERK, color = :red, label = "Noisy Data $(GF)", idxs=4)
+	plot(X, alpha = 0.75, color = :blue, 
+		label = "ERK Ground truth", idxs=5, title="ERK simulated data after $(GF) stimulation ($(GF_concentration)ng/ml)")
+	scatter!(time, xₙ_ERK, color = :blue, label = "ERK Noisy Data", idxs=4)
 end
 
 # ╔═╡ 01dc112c-34d7-4ca8-90da-69fd848fa50a
@@ -207,7 +200,7 @@ function ode_discovery!(du, u, p, t, p_true)
 
 	# Define ODE system with unknown part
 	# Receptor equation
-    du[1] = k_R * (1-u[1]) * GF * signal_f(t) - kd_R * u[1]
+    du[1] = k_R * (1-u[1]) * GF * f_signal(t) - kd_R * u[1]
 
 	# Ras equation
     du[2] = (k_Ras * u[1] * (1-u[2]) / (Km_Ras + (1-u[2])) - 
@@ -251,7 +244,7 @@ end
 function predict(θ, T=time)
     _prob = remake(prob_nn, p = θ)
     Array(solve(_prob, Vern7(), saveat = T,
-                abstol = 1e-6, reltol = 1e-6,
+                abstol = 1e-10, reltol = 1e-10,
                 sensealg=QuadratureAdjoint(autojacvec=ReverseDiffVJP(true))))
 end
 
@@ -283,6 +276,10 @@ end
 # ╔═╡ 4cb6e3a0-ac09-4cb7-9642-183e81e83f15
 # ╠═╡ show_logs = false
 begin
+	# Empty the loss array
+	if !isempty(losses)
+    	empty!(losses)
+	end
 	res1 = Optimization.solve(optprob1, OptimizationOptimisers.Adam(), callback = callback, maxiters = 5000)
 	println("Training loss after $(length(losses)) iterations: $(losses[end])")
 end
@@ -315,15 +312,15 @@ begin
 	X̂ = predict(p_trained, ts)
 	
 	# Trained on noisy data vs real solution
-	pl_trajectory = plot(ts, X̂[5,:], xlabel = "t", ylabel = "x(t), y(t)", color = :red, label = ["UDE Approximation" nothing])
-	scatter!(time, xₙ_ERK, color = :black, label = ["Measurements" nothing])
+	pl_trajectory = plot(ts, X̂[5,:], xlabel = "t", ylabel = "x(t), y(t)", color = :red, label = "ERK UDE Approximation")
+	scatter!(time, xₙ_ERK, color = :black, label = "ERK Noisy data")
 end
 
 # ╔═╡ e9e98899-b535-41bc-816f-eedafa62d29e
 begin
 	# Compare unknown part approximated by NN with ground truth
 	û = U(X̂, p_trained, _st)[1]
-	plot(ts, û[1,:], label="Unknown function approxiated by NN", ylim=(-1, 1))
+	plot(ts, û[1,:], label="Unknown function approximated by NN")
 
 	# Establish ground truth for unkown part of ODE system
 	u = (p_fix[10] .* X[7,:] .* (1 .- X[3,:]) ./ (p_fix[15] .+ (1 .- X[3,:])))
@@ -332,7 +329,7 @@ end
 
 # ╔═╡ 2cc827c5-f262-49f4-8ab8-34918994393a
 begin
-	# Compare predicted state variables with their respective ground truth
+	# Compare some predicted state variables with their respective ground truth
 	plot(ts, X̂[2,:], label="Predicted Ras", colour=:green, linewidth=2)
 	plot!(X.t, X[2,:], label="Ground truth Ras", linestyle=:dash, colour=:lightgreen, linewidth=2)
 	plot!(ts, X̂[3,:], label="Predicted Raf", colour=:blue, linewidth=2)
@@ -340,6 +337,63 @@ begin
 	plot!(ts, X̂[7,:], label="Predicted PFB", colour=:red, linewidth=2)
 	plot!(X.t, X[7,:], label="Ground truth PFB", colour=:pink, linewidth=2, linestyle=:dash)
 end
+
+# ╔═╡ a5974255-f523-4b77-bd0f-d0788a885d28
+md"""
+##### Visualisation of the results
+"""
+
+# ╔═╡ 2e70fde7-157f-4179-8d7d-d7e80d7170ed
+begin 
+	# Plot the simulated data, trained solution and ground truth ERK dynamics
+	simulated_data_plot = plot(X, color = :skyblue, linewidth=8, label = "Ground truth ERK", idxs=5)
+	plot!(ts, X̂[5,:], xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), color = :black, linewidth=2, label = "ERK Approximation (UDE)", title="Fitted ERK dynamics after $(GF) stimulation")
+	scatter!(time, xₙ_ERK, color = :darkorange, alpha=0.75, label = "Noisy ERK Data")
+	
+	# Plot unknown part approximated by NN with ground truth
+	nn_plot = plot(ts, û[1,:], label="NN Unknown", linewidth=2, title="Unknown function approximated by NN", xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm),)
+	plot!(X.t, u, linewidth=2, label="Ground truth", legend_position=:bottomright)
+
+	# Final two panels plot
+	plot(simulated_data_plot, nn_plot, layout=(2,1), size=(600, 800))
+
+	#savefig("./Plots/$(filename)_nn_unknown.png")
+end
+
+# ╔═╡ 51ba1751-7a83-45ad-a9c8-7ba7a32327fd
+begin
+	# Plot UDE full results for all model species
+	R_plot = plot(ts, X̂[1,:], label="Predicted", alpha = 0.25, color = :blue, linewidth=2, title="\nR", titlelocation=:left)
+	plot!(X.t, X[1,:], label="Ground truth", linestyle=:dash, colour=:purple, linewidth=2, ylabel = "x(t)", left_margin=(7,:mm))
+	
+	Ras_plot = plot(ts, X̂[2,:], label="Predicted", colour=:lightgreen, linewidth=2, title="\nRas", titlelocation=:left)
+	plot!(X.t, X[2,:], label="Ground truth", linestyle=:dash, colour=:green, linewidth=2)
+	
+	Raf_plot = plot(ts, X̂[3,:], label="Predicted", colour=:steelblue, alpha=0.75, linewidth=2, title="Raf", titlelocation=:left)
+	plot!(X.t, X[3,:], label="Ground truth", linestyle=:dash, colour=:darkblue, linewidth=2, ylabel = "x(t)", left_margin=(7,:mm))
+
+	MEK_plot = plot(ts, X̂[4,:], label="Predicted", colour=:yellow3, linewidth=2, title="MEK", titlelocation=:left)
+	plot!(X.t, X[4,:], label="Ground truth", linestyle=:dash, colour=:orange, linewidth=2)
+
+	ERK_plot = plot(ts, X̂[5,:], label="Predicted", colour=:blue, linewidth=2, title="ERK", titlelocation=:left)
+	plot!(X.t, X[5,:], label="Ground truth", linestyle=:dash, colour=:darkblue, linewidth=2)
+
+	NFB_plot = plot(ts, X̂[6,:], label="Predicted", colour=:lightpink, linewidth=2, title="NFB", titlelocation=:left)
+	plot!(X.t, X[6,:], label="Ground truth", linestyle=:dash, colour=:red, linewidth=2, xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), legend_position=:bottomright)
+	
+	PFB_plot = plot(ts, X̂[7,:], label="Predicted", colour=:grey, linewidth=2, title="PFB", titlelocation=:left)
+	plot!(X.t, X[7,:], label="Ground truth", colour=:black, linewidth=2, linestyle=:dash, legend_position=:bottomright, xlabel = "Time [min]")
+
+	# Final multipanel plot
+	plot(R_plot, Ras_plot, Raf_plot, MEK_plot, NFB_plot, PFB_plot, layout=(3,2), size=(800, 1000))
+
+	#savefig("./Plots/$(filename)_full_model.png")
+end
+
+# ╔═╡ 0d7ea038-35b6-4b21-815c-cc4eb81c810b
+md"""
+##### Saving results
+"""
 
 # ╔═╡ 23ab6f3f-34c1-4626-921d-01e4a7ebe499
 begin
@@ -353,6 +407,7 @@ begin
 		t_data=time_data,
 		ERK_data=erk_data,
 		NN_approx=û[1,:],
+		NN_GT=u,
 		R_fit=X̂[1,:], 
 		Ras_fit=X̂[2,:],
 		Raf_fit=X̂[3,:],
@@ -367,54 +422,8 @@ begin
 		ERK_GT=X[5,:],
 		NFB_GT=X[6,:],
 		PFB_GT=X[7,:]))
-	CSV.write("$(filename).csv", df, header=true)
+	#CSV.write("./Data/$(filename).csv", df, header=true)
 end
-
-# ╔═╡ a5974255-f523-4b77-bd0f-d0788a885d28
-md"""
-##### Analysis of the trained network
-"""
-
-# ╔═╡ 21d2c22b-a949-427a-a811-14c265da93cb
-#=╠═╡
-begin
-	
-	# Plot the data and the approximation
-	
-	# Rename the best candidate
-	p_trained_EGF = res_EGF2.u
-	X̂_EGF = predict_EGF(p_trained_EGF, ts)
-	
-	# Trained on noisy data vs real solution
-	plot(ts, X̂_EGF[5,:], xlabel = "t", ylabel = "x(t), y(t)", color = :red,
-	                     label = ["UDE Approximation" nothing])
-	scatter!(t, Xₙ_EGF, color = :black, label = ["Measurements" nothing])
-end
-  ╠═╡ =#
-
-# ╔═╡ 52f39454-b6de-4b7e-b28e-48e54d92996e
-#=╠═╡
-begin
-	# Compare unknown part approximated by NN with ground truth
-	û_EGF = U(X̂_EGF, p_trained_EGF, _st)[1]
-	plot(ts, û_EGF[1,:], label="Unknown function approxiated by NN", ylim=(-1,1))
-
-	# Establish ground truth for unkown part of ODE system
-	u_EGF = (p_EGF[10] .* solution_EGF[7,:] .* (1 .- solution_EGF[3,:]) ./ (p_EGF[15] .+ (1 .- solution_EGF[3,:])))
-	plot!(solution_EGF.t, u_EGF, label="Ground truth")
-end
-  ╠═╡ =#
-
-# ╔═╡ babda77f-0ec0-4211-a43f-a425fbdee07e
-#=╠═╡
-begin
-	# Compare predicted state variables with their respective ground truth
-	plot(ts, X̂_EGF[3,:], label="Predicted Raf", colour=:blue, linewidth=2)
-	plot!(solution_EGF.t, solution_EGF[3,:], label="Ground truth Raf", linestyle=:dash, colour=:steelblue, linewidth=2)
-	plot!(ts, X̂_EGF[7,:], label="Predicted PFB", colour=:red, linewidth=2)
-	plot!(solution_EGF.t, solution_EGF[7,:], label="Ground truth PFB", colour=:pink, linewidth=2, linestyle=:dash)
-end
-  ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -433,6 +442,7 @@ Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 SciMLSensitivity = "1ed8b502-d754-442c-8d5d-10ac956f44a1"
 StableRNGs = "860ef19b-820b-49d6-a774-d7a799459cd3"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+SymPy = "24249f21-da20-56a4-8eb1-6a02cf4ae2e6"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
@@ -449,6 +459,7 @@ OrdinaryDiffEq = "~6.74.1"
 Plots = "~1.40.3"
 SciMLSensitivity = "~7.56.2"
 StableRNGs = "~1.0.1"
+SymPy = "~2.0.1"
 Zygote = "~0.6.69"
 """
 
@@ -458,7 +469,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.4"
 manifest_format = "2.0"
-project_hash = "3b8ce0e3b92b44949dd388825be335fb89768edb"
+project_hash = "fc741d72b7270e7e5716f17b914e9ce90635af14"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "016833eb52ba2d6bea9fcb50ca295980e728ee24"
@@ -693,6 +704,11 @@ git-tree-sha1 = "08c8b6831dc00bfea825826be0bc8336fc369860"
 uuid = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
 version = "1.0.2"
 
+[[deps.CommonEq]]
+git-tree-sha1 = "6b0f0354b8eb954cdba708fb262ef00ee7274468"
+uuid = "3709ef60-1bee-4518-9f2f-acd86f176c50"
+version = "0.2.1"
+
 [[deps.CommonMark]]
 deps = ["Crayons", "JSON", "PrecompileTools", "URIs"]
 git-tree-sha1 = "532c4185d3c9037c0237546d817858b23cf9e071"
@@ -768,6 +784,12 @@ deps = ["Serialization", "Sockets"]
 git-tree-sha1 = "6cbbd4d241d7e6579ab354737f4dd95ca43946e1"
 uuid = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
 version = "2.4.1"
+
+[[deps.Conda]]
+deps = ["Downloads", "JSON", "VersionParsing"]
+git-tree-sha1 = "51cab8e982c5b598eea9c8ceaced4b58d9dd37c9"
+uuid = "8f4d0f93-b110-5947-807f-2305c1781a2d"
+version = "1.10.0"
 
 [[deps.ConsoleProgressMonitor]]
 deps = ["Logging", "ProgressMeter"]
@@ -2196,6 +2218,12 @@ git-tree-sha1 = "763a8ceb07833dd51bb9e3bbca372de32c0605ad"
 uuid = "92933f4c-e287-5a05-a399-4b506db050ca"
 version = "1.10.0"
 
+[[deps.PyCall]]
+deps = ["Conda", "Dates", "Libdl", "LinearAlgebra", "MacroTools", "Serialization", "VersionParsing"]
+git-tree-sha1 = "9816a3826b0ebf49ab4926e2b18842ad8b5c8f04"
+uuid = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
+version = "1.96.4"
+
 [[deps.Qt6Base_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "OpenSSL_jll", "Vulkan_Loader_jll", "Xorg_libSM_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Xorg_libxcb_jll", "Xorg_xcb_util_cursor_jll", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_keysyms_jll", "Xorg_xcb_util_renderutil_jll", "Xorg_xcb_util_wm_jll", "Zlib_jll", "libinput_jll", "xkbcommon_jll"]
 git-tree-sha1 = "37b7bb7aabf9a085e0044307e1717436117f2b3b"
@@ -2618,6 +2646,22 @@ deps = ["Artifacts", "Libdl", "libblastrampoline_jll"]
 uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
 version = "7.2.1+1"
 
+[[deps.SymPy]]
+deps = ["CommonEq", "CommonSolve", "LinearAlgebra", "PyCall", "SpecialFunctions", "SymPyCore"]
+git-tree-sha1 = "8d727c118eb31ffad73cce569b7bb29eef5fb9ad"
+uuid = "24249f21-da20-56a4-8eb1-6a02cf4ae2e6"
+version = "2.0.1"
+
+[[deps.SymPyCore]]
+deps = ["CommonEq", "CommonSolve", "Latexify", "LinearAlgebra", "Markdown", "RecipesBase", "SpecialFunctions"]
+git-tree-sha1 = "4c5a53625f0e53ce1e726a6dab1c870017303728"
+uuid = "458b697b-88f0-4a86-b56b-78b75cfb3531"
+version = "0.1.16"
+weakdeps = ["SymbolicUtils"]
+
+    [deps.SymPyCore.extensions]
+    SymPyCoreSymbolicUtilsExt = "SymbolicUtils"
+
 [[deps.SymbolicIndexingInterface]]
 deps = ["Accessors", "ArrayInterface", "MacroTools", "RuntimeGeneratedFunctions", "StaticArraysCore"]
 git-tree-sha1 = "4b7f4c80449d8baae8857d55535033981862619c"
@@ -2812,6 +2856,11 @@ deps = ["ArrayInterface", "CPUSummary", "HostCPUFeatures", "IfElse", "LayoutPoin
 git-tree-sha1 = "7209df901e6ed7489fe9b7aa3e46fb788e15db85"
 uuid = "3d5dd08c-fd9d-11e8-17fa-ed2836048c2f"
 version = "0.21.65"
+
+[[deps.VersionParsing]]
+git-tree-sha1 = "58d6e80b4ee071f5efd07fda82cb9fbe17200868"
+uuid = "81def892-9a0e-5fdd-b105-ffc91e053289"
+version = "1.3.0"
 
 [[deps.VertexSafeGraphs]]
 deps = ["Graphs"]
@@ -3156,9 +3205,8 @@ version = "1.4.1+1"
 # ╠═b20f103c-3907-11ef-0db3-9d51e15cfe29
 # ╟─ec8e34ed-59b4-4b37-9f2a-3964e8a55cd2
 # ╠═653a4726-2394-41fc-b052-a993f0aa7ec3
-# ╠═6b90847e-3162-45aa-9f12-f0c266a4f4ed
-# ╠═f469acd4-cf1a-4c82-a692-d3291342136f
-# ╠═5663563b-4ab7-46c0-bcba-efb9c0281dd4
+# ╟─6b90847e-3162-45aa-9f12-f0c266a4f4ed
+# ╟─e6644339-6295-497e-8632-86f1a77c7574
 # ╟─fd44b9dd-a48a-48e9-809a-52ecf8df38a1
 # ╠═465048dc-b288-4578-88f7-76011fff7626
 # ╠═b529a576-4ec7-46e3-8915-43ce22ba2d5a
@@ -3172,14 +3220,14 @@ version = "1.4.1+1"
 # ╠═581be023-c448-478f-a3f8-47c7d4ddb4b3
 # ╠═4cb6e3a0-ac09-4cb7-9642-183e81e83f15
 # ╠═d72d0420-f214-49fb-bd8d-f79fe0b32f7f
-# ╠═dacd63b1-ad7a-4699-bf32-8d3cf88f90bc
-# ╠═343843bd-a782-45bf-a151-a9d8dcacb2ed
-# ╠═e9e98899-b535-41bc-816f-eedafa62d29e
-# ╠═2cc827c5-f262-49f4-8ab8-34918994393a
-# ╠═23ab6f3f-34c1-4626-921d-01e4a7ebe499
+# ╟─dacd63b1-ad7a-4699-bf32-8d3cf88f90bc
+# ╟─343843bd-a782-45bf-a151-a9d8dcacb2ed
+# ╟─e9e98899-b535-41bc-816f-eedafa62d29e
+# ╟─2cc827c5-f262-49f4-8ab8-34918994393a
 # ╟─a5974255-f523-4b77-bd0f-d0788a885d28
-# ╠═21d2c22b-a949-427a-a811-14c265da93cb
-# ╠═52f39454-b6de-4b7e-b28e-48e54d92996e
-# ╠═babda77f-0ec0-4211-a43f-a425fbdee07e
+# ╟─2e70fde7-157f-4179-8d7d-d7e80d7170ed
+# ╟─51ba1751-7a83-45ad-a9c8-7ba7a32327fd
+# ╟─0d7ea038-35b6-4b21-815c-cc4eb81c810b
+# ╠═23ab6f3f-34c1-4626-921d-01e4a7ebe499
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
