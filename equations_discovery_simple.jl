@@ -5,7 +5,7 @@ using Markdown
 using InteractiveUtils
 
 # ╔═╡ 49891ff9-577b-4f0e-b792-df0c20b17a84
- using DataDrivenDiffEq, DataDrivenSparse, DataFrames, Plots, CSV, StableRNGs, ComponentArrays, SmoothingSplines, OrdinaryDiffEq
+using DataDrivenDiffEq, DataDrivenSparse, DataFrames, Plots, CSV, StableRNGs, ComponentArrays, SmoothingSplines, OrdinaryDiffEq
 
 # ╔═╡ 32567f8e-07df-46c7-ab17-aaaa20633005
 begin
@@ -16,12 +16,29 @@ begin
 end
 
 # ╔═╡ c3330c5f-e055-4dc2-891b-bc3c106576ad
-rng = StableRNG(1111)
+rng = StableRNG(1112)
+
+# ╔═╡ fc07655b-1c8d-4975-ba1f-38f783d56942
+begin
+	import Symbolics: infimum as Symbolics_infimum, supremum as Symbolics_supremum
+	import ModelingToolkit: infimum as MT_infimum, supremum as MT_supremum
+end
 
 # ╔═╡ b580cb5b-98ae-4be1-9ac3-c6041c57872b
 md"""
-### Equations discovery for Negative Feedback Loop model 
-Reference model from the book Quantitative Biology: Theory, Computational Methods and Examples of ModelsDaniel's book, Daniels et al.
+## Data driven equation discovery for Negative Feedback Loop model 
+Reference model from the book Quantitative Biology: Theory, Computational Methods and Examples of Models, Daniels et al.
+"""
+
+# ╔═╡ f26afbca-1fbf-4338-b3de-cd74e920f48d
+md"""
+##### Simulate data for the four following cases:
+- no feedback loop
+- negative feedback loop of X on g1p
+- negative feedback loop of X on g2p
+- negative feedback loop of X on g1p and g2p
+for a given concentration of input.
+
 """
 
 # ╔═╡ afec829a-3e99-11ef-35e0-5171fe204979
@@ -44,83 +61,91 @@ end
 
 # ╔═╡ fb56bbd4-e040-4e7c-92df-8149278593ab
 begin
-	p_ref_noFB = [0.5, 5, 5, 0.03, 0.1, 0.1,
-			 	  0.1, 0.1, 0.1, 0.1, 1, 10,
-			 	  0, 0, 0.1]
+	p_noFB = [0.5, 5, 5, 0.03, 0.1, 0.1,
+			  0.1, 0.1, 0.1, 0.1, 1, 10,
+			  0, 0, 0.05]
 	u0 = repeat([0], 3)
 	tspan = (0., 100.)
 
 	# Define and solve ODE problem for specific case
 	#prob_ref_noFB = ODEProblem{true, SciMLBase.NoSpecialize}(NFB!, u0, tspan, p_ref_noFB)
-	prob_ref_noFB = ODEProblem(NFB!, u0, tspan, p_ref_noFB)
-	X_ref_noFB = solve(prob_ref_noFB, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
-	plot(X_ref_noFB, idxs=2, label="No NFB")
+	prob_noFB = ODEProblem(NFB!, u0, tspan, p_noFB)
+	X_noFB = solve(prob_noFB, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
+	model_plot = plot(X_noFB, idxs=2, label="No NFB")
 	[]
 end
 
 # ╔═╡ 23cead69-7494-4725-92de-09d9810a9da8
 begin
-	p_ref_Xa = copy(p_ref_noFB)
-	p_ref_Xa[13] = 1
+	p_a = copy(p_noFB)
+	p_a[13] = 1
 
 	# Define and solve ODE problem for specific case
 	#prob_ref_Xa = ODEProblem{true, SciMLBase.NoSpecialize}(NFB!, u0, tspan, p_ref_Xa)
-	prob_ref_Xa = ODEProblem(NFB!, u0, tspan, p_ref_Xa)
-	X_ref_Xa = solve(prob_ref_Xa, Tsit5(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125) 
-	plot!(X_ref_Xa, idxs=[2], label="NFB on g1p")
+	prob_a = ODEProblem(NFB!, u0, tspan, p_a)
+	X_a = solve(prob_a, Tsit5(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125) 
+	plot!(model_plot, X_a, idxs=2, label="NFB on g1p")
 	[]
 end
 
 # ╔═╡ beb76aaa-dbf0-4ed6-989d-cb537fc907c6
 begin
-	p_ref_Xb = copy(p_ref_noFB)
-	p_ref_Xb[14] = 1
+	p_b = copy(p_noFB)
+	p_b[14] = 1
 
 	# Define and solve ODE problem for specific case
 	#prob_ref_Xb = ODEProblem{true, SciMLBase.NoSpecialize}(NFB!, u0, tspan, p_ref_Xb)
-	prob_ref_Xb = ODEProblem(NFB!, u0, tspan, p_ref_Xb)
-	X_ref_Xb = solve(prob_ref_Xb, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
-	plot!(X_ref_Xb, idxs=[2], label="NFB on g2p")
+	prob_b = ODEProblem(NFB!, u0, tspan, p_b)
+	X_b = solve(prob_b, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
+	plot!(model_plot, X_b, idxs=2, label="NFB on g2p")
 	[]
 end
 
 # ╔═╡ 132482c4-9694-4d3f-9896-5f71f44791f7
 begin
-	p_ref_Xab = copy(p_ref_noFB)
-	p_ref_Xab[13:14] .= 1
+	p_ab = copy(p_noFB)
+	p_ab[13:14] .= 1
 
 	# Define and solve ODE problem for specific case
 	#prob_ref_Xab = ODEProblem{true, SciMLBase.NoSpecialize}(NFB!, u0, tspan, p_ref_Xab)
-	prob_ref_Xab = ODEProblem(NFB!, u0, tspan, p_ref_Xab)
-	X_ref_Xab = solve(prob_ref_Xab, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
-	plot!(X_ref_Xab, idxs=2, label="NFB on g1p and g2p")
+	prob_ab = ODEProblem(NFB!, u0, tspan, p_ab)
+	X_ab = solve(prob_ab, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
+	plot!(model_plot, X_ab, idxs=2, label="NFB on g1p and g2p", title="Ground truth trajectories")
 end
 
 # ╔═╡ e7fc76d8-dcea-4e29-adb1-edef62db7b31
 begin
-	# Define and solve ODE problem for specific case
-	prob_data_noFB = ODEProblem(NFB!, u0, tspan, p_ref_noFB)
-	X_noFB = solve(prob_data_noFB, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
-	
 	# Add noise in terms of the mean
-	x_g2p = Array(X_noFB)[2,begin:10:end]
+	x_g2p_noFB = Array(X_noFB)[2,begin:10:end]
 	time = X_noFB.t[begin:10:end]
 	
-	x̄_g2p = mean(x_g2p, dims = 1)
+	x̄_g2p_noFB = mean(x_g2p_noFB, dims = 1)
 	noise_magnitude = 5e-3
-	xₙ_g2p = abs.(x_g2p .+ (noise_magnitude * x̄_g2p) .* randn(rng, eltype(x_g2p), size(x_g2p)))
+	xₙ_g2p_noFB = abs.(x_g2p_noFB .+ (noise_magnitude * x̄_g2p_noFB) .* randn(rng, eltype(x_g2p_noFB), size(x_g2p_noFB)))
 	
 	plot(X_noFB, alpha = 0.75, color = :blue, 
-		label = "g2p Ground truth", idxs=2, title="g2p simulated data")
-	scatter!(time, xₙ_g2p, color = :blue, label = "g2p Noisy Data", idxs=4)
+		label = "noFB Ground truth", idxs=2, title="g2p simulated data")
+	scatter!(time, xₙ_g2p_noFB, color = :blue, label = "noFB Noisy Data", idxs=4)
+	[]
+end
+
+# ╔═╡ 0c52ece6-2591-4485-a862-b836ad55dc08
+begin
+	# Add noise in terms of the mean
+	x_g2p_a = Array(X_a)[2,begin:10:end]
+	
+	x̄_g2p_a = mean(x_g2p_a, dims = 1)
+	#noise_magnitude = 5e-3
+	xₙ_g2p_a = abs.(x_g2p_a .+ (noise_magnitude * x̄_g2p_a) .* randn(rng, eltype(x_g2p_a), size(x_g2p_a)))
+	
+	plot!(X_a, alpha = 0.75, color = :orange, 
+		label = "a Ground truth", idxs=2)
+	scatter!(time, xₙ_g2p_a, color = :orange, label = "a Noisy Data", idxs=4)
+	[]
 end
 
 # ╔═╡ 6f752720-dcd1-4f33-be2f-89cf4e88ebc9
 begin
-	# Define and solve ODE problem for specific case
-	prob_data_Xb = ODEProblem(NFB!, u0, tspan, p_ref_Xb)
-	X_b = solve(prob_data_Xb, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
-	
 	# Add noise in terms of the mean
 	x_g2p_b = Array(X_b)[2,begin:10:end]
 	#time = X_b.t[begin:10:end]
@@ -129,26 +154,36 @@ begin
 	#noise_magnitude = 5e-3
 	xₙ_g2p_b = abs.(x_g2p_b .+ (noise_magnitude * x̄_g2p_b) .* randn(rng, eltype(x_g2p_b), size(x_g2p_b)))
 	
-	plot(X_b, alpha = 0.75, color = :blue, 
-		label = "g2p Ground truth", idxs=2, title="g2p simulated data")
-	scatter!(time, xₙ_g2p_b, color = :blue, label = "g2p Noisy Data", idxs=4)
+	plot!(X_b, alpha = 0.75, color = :green, 
+		label = "b Ground truth", idxs=2)
+	scatter!(time, xₙ_g2p_b, color = :green, label = "b Noisy Data", idxs=4)
+	[]
 end
 
 # ╔═╡ 744cfed2-9df3-4b14-8481-befe4d6e34fa
 begin
-	# Define and solve ODE problem for specific case
-	prob_data_Xab = ODEProblem(NFB!, u0, tspan, p_ref_Xab)
-	X_ab = solve(prob_data_Xab, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
-	
 	# Add noise in terms of the mean
 	x_g2p_ab = Array(X_ab)[2,begin:10:end]
 	
 	x̄_g2p_ab = mean(x_g2p_ab, dims = 1)
 	xₙ_g2p_ab = abs.(x_g2p_ab .+ (noise_magnitude * x̄_g2p_ab) .* randn(rng, eltype(x_g2p_ab), size(x_g2p_ab)))
 	
-	plot(X_ab, alpha = 0.75, color = :blue, 
-		label = "g2p Ground truth", idxs=2, title="g2p simulated data")
-	scatter!(time, xₙ_g2p_ab, color = :blue, label = "g2p Noisy Data", idxs=4)
+	plot!(X_ab, alpha = 0.75, color = :red, 
+		label = "ab Ground truth", idxs=2)
+	scatter!(time, xₙ_g2p_ab, color = :red, label = "ab Noisy Data", idxs=4)
+end
+
+# ╔═╡ fa95d93c-cf10-440c-b2b9-e35835dd3583
+md"""
+##### Solve UDE
+"""
+
+# ╔═╡ 50e4ed7b-8d22-40e8-b1b1-bce0e09a180c
+begin
+	# Define which case (noFB, a, b, ab) to estimate the unknown part
+	filename = "NFB_ab_005"
+	xₙ_g2p = xₙ_g2p_ab
+	X = X_ab
 end
 
 # ╔═╡ 3e42e37d-bd87-4834-80f5-a18bac40a453
@@ -156,7 +191,7 @@ begin
 	rbf(x) = exp.(-(x .^ 2))
 	
 	# Multilayer FeedForward
-	const U = Lux.Chain(Lux.Dense(3, 32, rbf), Lux.Dense(32, 32, rbf), Lux.Dense(32, 32, rbf), Lux.Dense(32, 32, rbf), Lux.Dense(32, 2))
+	const U = Lux.Chain(Lux.Dense(3, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 2))
 	
 	# Get the initial parameters and state variables of the model
 	p, st = Lux.setup(rng, U)
@@ -187,7 +222,7 @@ end
 # ╔═╡ 5f439d4b-66b0-4ce2-83a0-b6a49f3b4f98
 begin
 	# Closure with the known parameter
-	nn_NFB!(du, u, p, t) = ode_discovery!(du, u, p, t, p_ref_Xab)
+	nn_NFB!(du, u, p, t) = ode_discovery!(du, u, p, t, p_ab)
 	
 	# Define the problem
 	prob_nn = ODEProblem(nn_NFB!, u0, tspan, p)
@@ -204,7 +239,7 @@ end
 # ╔═╡ e2914ec1-13f8-422b-ae2c-d2023f55a013
 function loss(θ)
     X̂ = predict(θ)
-    mean(abs2, xₙ_g2p_ab .- X̂[2,:])
+    mean(abs2, xₙ_g2p .- X̂[2,:])
 end
 
 # ╔═╡ 4a98cf62-c69c-4edc-801e-340696d4a03f
@@ -253,77 +288,82 @@ begin
 	      xlabel = "Iterations", ylabel = "Loss", label = "LBFGS", color = :red)
 end
 
-# ╔═╡ 2b8e2efa-8212-4ed3-a291-cf7fa7eda8a6
+# ╔═╡ 01f2d129-c2b4-4dc4-af74-291a7257b799
+md"""
+##### Visualise results
+"""
+
+# ╔═╡ c118c335-6557-448b-9869-2ec2381e5f1a
 begin
-	## Analysis of the trained network
-	# Plot the data and the approximation
-	ts = first(X_noFB.t):(mean(diff(X_noFB.t))):last(X_noFB.t)
-	
-	# Rename the best candidate
-	p_trained_noFB = #copy(res2.u)
-	X̂_noFB = predict(p_trained_noFB, ts)
-	
+	# retrieve the trained parameters and get NFB model estimations
+	p_trained = res2.u
+	ts = first(X.t):(mean(diff(X.t))):last(X.t) 
+	X̂ = predict(p_trained, ts)
+
 	# Trained on noisy data vs real solution
-	pl_trajectory = plot(ts, X̂_noFB[2,:], xlabel = "Time", ylabel = "x(t)", color = :red, label = "g2p Approximation")
+	pl_trajectory = plot(ts, X̂[2,:], xlabel = "Time", ylabel = "x(t)", color = :red, label = "g2p Approximation", linewidth=2, title="g2p fitting")
 	scatter!(time, xₙ_g2p, color = :black, label = "g2p Noisy data")
 end
 
-# ╔═╡ 577e721d-6213-46b8-8bdc-426499069f99
+# ╔═╡ 465bec25-bdb0-47ab-af49-04a52dda13a3
 begin
 	# Compare unknown part approximated by NN with ground truth
-	û_noFB = U(X̂_noFB, p_trained_noFB, _st)[1]
-	plot(ts, û_noFB[1,:], label="Unknown function approximated by NN", ylim=(0.8, 1.2))
-	plot!(ts, û_noFB[2,:], label="Unknown function approximated by NN", ylim=(0.8, 1.2))
+	û = U(X̂, p_trained, _st)[1]
+	plot(ts, û[1,:], label="Û₁ approximated by NN", colour=:blue, title="NN approximation")
+	plot!(ts, û[2,:], label="Û₂ approximated by NN", colour=:green)
+	# Case noFB
+	#plot!(ts, repeat([1], length(ts)), label="U₁ and U₂ Ground truth", colour=:black, linestyle=:dash)
+	# Case a
+	plot!(ts, X[3,:], label="U₁ Ground truth", colour=:blue, linestyle=:dash)
+	plot!(ts, repeat([1], length(ts)), label="U₂ Ground truth", colour=:green, linestyle=:dash)
+	# Case b
+	#plot!(ts, repeat([1], length(ts)), label="U₁ Ground truth", colour=:blue, linestyle=:dash)
+	#plot!(ts, X[3,:], label="U₂ Ground truth", colour=:green, linestyle=:dash)
+	# Case ab
+	#plot!(ts, X[3,:], label="U₁ and U₂ Ground truth", colour=:black, linestyle=:dash)
 end
 
-# ╔═╡ 82face5a-fc45-4681-a197-26851dfec478
+# ╔═╡ 1d8b984b-9c34-4daf-992f-380bf90cf033
 begin
 	# Compare some predicted state variables with their respective ground truth
-	plot(ts, X̂_noFB[1,:], label="Predicted g1p", colour=:green, linewidth=2)
-	plot!(X_noFB.t, X_noFB[1,:], label="Ground truth g1p", linestyle=:dash, colour=:lightgreen, linewidth=2)
-	plot!(ts, X̂_noFB[2,:], label="Predicted g2p", colour=:blue, linewidth=2)
-	plot!(X_noFB.t, X_noFB[2,:], label="Ground truth g2p", linestyle=:dash, colour=:steelblue, linewidth=2)
-	plot!(ts, X̂_noFB[3,:], label="Predicted Xact", colour=:red, linewidth=2)
-	plot!(X_noFB.t, X_noFB[3,:], label="Ground truth Xact", colour=:pink, linewidth=2, linestyle=:dash)
+	plot(ts, X̂[1,:], label="Predicted g1p", colour=:green, linewidth=2, title="Full model prediction")
+	plot!(X.t, X[1,:], label="Ground truth g1p", linestyle=:dash, colour=:lightgreen, linewidth=2)
+	plot!(ts, X̂[2,:], label="Predicted g2p", colour=:blue, linewidth=2)
+	plot!(X.t, X[2,:], label="Ground truth g2p", linestyle=:dash, colour=:steelblue, linewidth=2)
+	plot!(ts, X̂[3,:], label="Predicted Xact", colour=:red, linewidth=2)
+	plot!(X.t, X[3,:], label="Ground truth Xact", colour=:pink, linewidth=2, linestyle=:dash)
 end
 
 # ╔═╡ 7c3488c8-b078-48cc-86e8-872a39fc84c4
 # Save the trained parameters 
-#save_object("./Data/nn_parameter_simple_ab.jld2", res2.u)
+#save_object("./Data/nn_parameter_simple_a_backup.jld2", res2.u)
 
-# ╔═╡ be042a33-1696-4462-9436-7f8c8c6c74a6
-begin
-	# Loading the trained parameters and get NFB model estimations
-	p_trained_b = load_object("./Data/nn_parameter_simple_caseb.jld2")
-	X̂_b = predict(p_trained_b, ts)
-end
+# ╔═╡ a45bfd37-1c02-4c17-b759-e40610850703
+md"""
+##### Save results
+"""
 
-# ╔═╡ a20e8de9-f8ce-4631-b1fa-c755b2ed76fe
+# ╔═╡ 0be75291-f802-4acc-913c-52ae84fba37b
 begin
-	# Trained on noisy data vs real solution
-	pl_trajectory_b = plot(ts, X̂_b[2,:], xlabel = "Time", ylabel = "x(t)", color = :red, label = "g2p Approximation", linewidth=2)
-	scatter!(time, xₙ_g2p_b, color = :black, label = "g2p Noisy data")
-end
-
-# ╔═╡ a687ebf7-e8ac-408c-8c50-247c6d918ce4
-begin
-	# Compare unknown part approximated by NN with ground truth
-	û_b = U(X̂_b, p_trained_b, _st)[1]
-	plot(ts, û_b[1,:], label="Û₁ approximated by NN", colour=:blue)
-	plot!(ts, û_b[2,:], label="Û₂ approximated by NN", colour=:green)
-	plot!(ts, repeat([1], length(ts)), label="U₁ Ground truth", colour=:blue, linestyle=:dash)
-	plot!(ts, X̂_b[3, :], label="U₂ Ground truth", colour=:green, linestyle=:dash)
-end
-
-# ╔═╡ 10b2a138-a22e-42b1-87eb-a83f1def2df6
-begin
-	# Compare some predicted state variables with their respective ground truth
-	plot(ts, X̂_b[1,:], label="Predicted g1p", colour=:green, linewidth=2)
-	plot!(X_b.t, X_b[1,:], label="Ground truth g1p", linestyle=:dash, colour=:lightgreen, linewidth=2)
-	plot!(ts, X̂_b[2,:], label="Predicted g2p", colour=:blue, linewidth=2)
-	plot!(X_b.t, X_b[2,:], label="Ground truth g2p", linestyle=:dash, colour=:steelblue, linewidth=2)
-	plot!(ts, X̂_b[3,:], label="Predicted Xact", colour=:red, linewidth=2)
-	plot!(X_b.t, X_b[3,:], label="Ground truth Xact", colour=:pink, linewidth=2, linestyle=:dash)
+	# Save NN approximation with the fitted and GT ODE solution for equation discovery
+	g2p_data = zeros(length(X[1,:]))
+	time_data = zeros(length(X[1,:]))
+	g2p_data[begin:length(xₙ_g2p)] = xₙ_g2p
+	time_data[begin:length(time)] = time
+	df = DataFrame((
+		time=X.t,
+		t_data=time_data,
+		g2p_data=g2p_data,
+		NN1=û[1,:],
+		NN2=û[2,:],
+		g1p_fit=X̂[1,:],
+		g2p_fit=X̂[2,:],
+		Xact_fit=X̂[3,:],
+		g1p_GT=X[1,:],
+		g2p_GT=X[2,:],
+		Xact_GT=X[3,:],
+		))
+	#CSV.write("./Data/$(filename).csv", df, header=true)
 end
 
 # ╔═╡ 5e214b9f-8c74-4eb6-bd73-1c42d8421245
@@ -331,22 +371,60 @@ md"""
 ### Equation discovery
 """
 
-# ╔═╡ c1d2cfca-6d26-4529-8cd6-b1989bd9910e
+# ╔═╡ 5ff8fdd1-8865-43e1-b369-6132fefd1bf3
 begin
-	no_FB_dd_prob = DirectDataDrivenProblem(X̂_noFB, û_noFB)
-	b_dd_prob = DirectDataDrivenProblem(X̂_b, û_b)
+	# Loading the trained parameters and get NFB model estimations
+	df_noFB_01 = CSV.read("./Data/NFB_noFB_01.csv", DataFrame)
+	df_a_01 = CSV.read("./Data/NFB_a_01.csv", DataFrame)
+	df_a_005 = CSV.read("./Data/NFB_a_005.csv", DataFrame)
+	df_b_01 = CSV.read("./Data/NFB_b_01.csv", DataFrame)
+	df_b_005 = CSV.read("./Data/NFB_b_005.csv", DataFrame)
+	df_ab_01 = CSV.read("./Data/NFB_ab_01.csv", DataFrame)
 end
 
-# ╔═╡ 4e21647e-1ac7-4671-a698-19590f572544
+# ╔═╡ c1d2cfca-6d26-4529-8cd6-b1989bd9910e
 begin
-	@variables a[1:3] l[1:1]
-	a = collect(a)
-	l = collect(l)
-	#D = Differential(t)
-	h = monomial_basis(a, 2)
-	#fn_basis = Basis(Num[v[1], v[2], v[1]v[2], v[1]v[3]], v)
-	implicit_basis = Basis(h, a, iv=t)
+	dd_prob_noFB = DirectDataDrivenProblem(
+		[df_noFB_01.g1p_fit df_noFB_01.g2p_fit df_noFB_01.Xact_fit]', 
+		[df_noFB_01.NN1 df_noFB_01.NN2]')
+	dd_prob_a = DataDrivenDataset(DirectDataDrivenProblem(
+		[df_a_01.g1p_fit df_a_01.g2p_fit df_a_01.Xact_fit]', 
+		[df_a_01.NN1 df_a_01.NN2]'),
+		DirectDataDrivenProblem(
+		[df_a_005.g1p_fit df_a_005.g2p_fit df_a_005.Xact_fit]', 
+		[df_a_005.NN1 df_a_005.NN2]'))
+	dd_prob_b = DirectDataDrivenProblem(
+		[df_b_005.g1p_fit df_b_005.g2p_fit df_b_005.Xact_fit]', 
+		[df_b_005.NN1 df_b_005.NN2]') #DataDrivenDataset(DirectDataDrivenProblem(
+		#[df_b_01.g1p_fit df_b_01.g2p_fit df_b_01.Xact_fit]', 
+		#[df_b_01.NN1 df_b_01.NN2]'),
+		#DirectDataDrivenProblem(
+		#[df_b_005.g1p_fit df_b_005.g2p_fit df_b_005.Xact_fit]', 
+		#[df_b_005.NN1 df_b_005.NN2]'))
+	dd_prob_ab = DirectDataDrivenProblem(
+		[df_ab_01.g1p_fit df_ab_01.g2p_fit df_ab_01.Xact_fit]', 
+		[df_ab_01.NN1 df_ab_01.NN2]')
 end
+
+# ╔═╡ 298fb3a7-4e9e-40c0-8280-516a99b53ac3
+md"""
+#### Case noFB
+"""
+
+# ╔═╡ 294160be-a3e6-4de4-aa7e-d3ffcf09b848
+md"""
+#### Case a
+"""
+
+# ╔═╡ a114c4b1-9fe3-44b3-9965-456284dba635
+md"""
+#### Case b
+"""
+
+# ╔═╡ 1e0a9f94-24ed-4893-87c0-c374bfdb36d5
+md"""
+#### Case ab
+"""
 
 # ╔═╡ 0d60a28f-0cd2-49d2-a826-9cf58d2a17a4
 md"""
@@ -375,20 +453,83 @@ begin
 	basis_diff = Basis(eqs_diff, g, independent_variable = t, implicits = D.(g))
 end
 
+# ╔═╡ 4e21647e-1ac7-4671-a698-19590f572544
+begin
+	@variables a[1:3] l[1:2]
+	a = collect(a)
+	l = collect(l)
+	h = monomial_basis(a, 2)
+	basis = Basis(h, a, iv=t)
+end
+
+# ╔═╡ ffa7e1a0-e2df-47d6-b7d1-b412d1bec6c7
+begin
+	sampler = DataProcessing(split = 0.8, shuffle = true, batchsize = 30)
+	res_dd_noFB = solve(dd_prob_noFB, basis, ADMM(1e-2:1e-1:5e-1), options = DataDrivenCommonOptions(data_processing = sampler, digits=2))
+	res_dd_a = solve(dd_prob_a, basis, ADMM(1e-2:1e-1:5e-1), options = DataDrivenCommonOptions(data_processing = sampler, digits=2))
+	res_dd_b = solve(dd_prob_b, basis, ADMM(1e-2:1e-1:5e-1), options = DataDrivenCommonOptions(data_processing = sampler, digits=2))
+	res_dd_ab = solve(dd_prob_ab, basis, ADMM(1e-2:1e-1:5e-1),
+	            options = DataDrivenCommonOptions(data_processing = sampler, digits=2))
+end
+
+# ╔═╡ 7f28b497-d3a2-418a-babc-b54459be5458
+plot(res_dd_noFB)
+
+# ╔═╡ 40b13cd1-c099-4307-9385-655e5fa86867
+begin
+	eqs_noFB = get_basis(res_dd_noFB)
+	println(eqs_noFB)
+	param_noFB = get_parameter_map(eqs_noFB)
+	println(param_noFB)
+end
+
+# ╔═╡ 93b0175d-0df2-44b9-b8fa-d6932343396a
+plot(res_dd_a)
+
+# ╔═╡ 3d54e24b-a38b-49c2-86fa-8c9469af3f45
+begin
+	eqs_a = get_basis(res_dd_a)
+	println(eqs_a)
+	param_a = get_parameter_map(eqs_a)
+	println(param_a)
+end
+
+# ╔═╡ a821e50e-4de7-4c17-917b-de1b90c144f5
+plot(res_dd_b)
+
+# ╔═╡ cb805420-39a1-409b-ae0f-6760353c3ad9
+begin
+	eqs_b = get_basis(res_dd_b)
+	println(eqs_b)
+	param_b = get_parameter_map(eqs_b)
+	println(param_b)
+end
+
+# ╔═╡ 8d14a58d-e79a-4717-a1ba-b71b52367e86
+plot(res_dd_ab)
+
+# ╔═╡ f84f88a0-0a11-421e-813b-a495de6c7c68
+begin
+	eqs_ab = get_basis(res_dd_ab)
+	println(eqs_ab)
+	param_ab = get_parameter_map(eqs_ab)
+	println(param_ab)
+end
+
 # ╔═╡ 4059faf6-3b57-4f16-909b-5d66fadab66c
 begin
 	# Get derivatives from NFB ODE system as Y output for data driven problem
 	Ŷ = zeros(801, 3)
 	du = [0., 0., 0.]
 	for i in 1:801 
-		NFB!(du, X_ref_Xa.u[i], p_ref_Xa, X_ref_Xa.t[i])
+		NFB!(du, X_a.u[i], p_a, X_a.t[i])
 		Ŷ[i,:] = du
 	end
-	X̂ = reduce(hcat, X_ref_Xa.u)
-	dX̂ = transpose(Ŷ)
+	X̂_a = reduce(hcat, X_a.u)
+	dX̂_a = transpose(Ŷ)
 
 	# Define a direct data driven problem using estimated Y output
-	direct_dd_prob = DirectDataDrivenProblem(X̂, dX̂)
+	direct_dd_prob = DirectDataDrivenProblem(X̂_a, dX̂_a)
 
 	@variables j[1:3]
 	j = collect(j)
@@ -400,114 +541,16 @@ end
 
 # ╔═╡ 6a114bf5-1a21-4d9a-834c-a3559e57f4df
 begin
-	sampler = DataProcessing(split = 0.8, shuffle = true, batchsize = 30)
-	#res_diff_dd = solve(diff_dd_prob, basis_diff, ImplicitOptimizer(STLSQ(1e-2:1e-2:1.0)), 
-	#	options = DataDrivenCommonOptions(data_processing = sampler, digits = 2))
+	#res_diff_dd = solve(diff_dd_prob, basis_diff, 
+	#					 ImplicitOptimizer(STLSQ(1e-2:1e-2:1.0)), 
+	#					 options = DataDrivenCommonOptions(data_processing = sampler, 
+	#					 digits = 2))
 	res_direct_dd = solve(direct_dd_prob, basis_direct, ImplicitOptimizer(),
 	            options = DataDrivenCommonOptions(data_processing = sampler, digits = 2))
 end
 
-# ╔═╡ ffa7e1a0-e2df-47d6-b7d1-b412d1bec6c7
-begin
-	#sampler = DataProcessing(split = 0.8, shuffle = true, batchsize = 30)
-	#res_diff_dd = solve(diff_dd_prob, basis_diff, ImplicitOptimizer(STLSQ(1e-2:1e-2:1.0)), 
-	#	options = DataDrivenCommonOptions(data_processing = sampler, digits = 2))
-	res_noFB_dd = solve(no_FB_dd_prob, implicit_basis, STLSQ(1e-3:1e-2:1.0, 1e-2),
-	            options = DataDrivenCommonOptions(data_processing = sampler, digits=2))
-	res_b_dd = solve(b_dd_prob, implicit_basis, STLSQ(1e-3:1e-2:1.0, 1e-2),
-	            options = DataDrivenCommonOptions(data_processing = sampler, digits=2))
-end
-
-# ╔═╡ f84f88a0-0a11-421e-813b-a495de6c7c68
-begin
-	eqs_b = get_basis(res_b_dd)
-	param_b = get_parameter_map(eqs_b)
-end
-
-# ╔═╡ 959ba82a-1f4c-43ab-93c6-d59e81c2e921
-begin
-	eqs = get_basis(res_noFB_dd)
-	param = get_parameter_map(eqs)
-end
-
-# ╔═╡ 1a44d03b-f283-412a-be2b-e385ee169d8c
-println(eqs)
-
-# ╔═╡ bf1b55cb-be85-486f-aa71-a985f1da4577
-plot(res_noFB_dd)
-
 # ╔═╡ aee032d7-6956-4208-ae98-c5dac89bff61
 plot(res_direct_dd)
-
-# ╔═╡ 2d63bb35-df93-40ea-9d40-8466428dd4c7
-#plot(res_diff_dd)
-
-# ╔═╡ 275d1001-a906-4b95-8bac-66c83f785800
-function unknownPart(u, p, t)
-	k2_Raf, K_PFB = p
-	du = k2_Raf * u[2] * (1-u[1]) / (K_PFB + (1-u[1]))
-	return du
-end
-
-# ╔═╡ 4be22dba-a5d9-4c5e-beca-3d5908b36070
-begin
-	filename = "ngf_highCC_10m_3pulse"
-	filename2 = "ngf_highCC_10m"
-	df = CSV.read("./Data/$(filename).csv", DataFrame)
-	df2 = CSV.read("./Data/$(filename2).csv", DataFrame)
-end
-
-# ╔═╡ 0757c87a-c4b4-4662-8923-a590369b5f72
-begin
-	X = [df.Raf_GT df.PFB_GT]'
-	X2 = [df2.Raf_GT df2.PFB_GT]'
-	p_nn = [0.75, 0.01]
-	
-	# Get output from unknownPart function as Y output for data driven problem
-	ẑ = zeros(1, 801)
-	ẑ2 = zeros(1, 801)
-	n̂ = zeros(1, 801)
-	for i in 1:801 
-		ẑ[1,i] = unknownPart(X[:,i], p_nn, df.time[i])
-		ẑ2[1,i] = unknownPart(X2[:,i], p_nn, df2.time[i])
-	end
-	lambda = 100.0  # smoothing parameter
-	spl = fit(SmoothingSpline, df.time, df.NN_approx, lambda)
-	smoothed_y = predict(spl)
-	n̂[1, :] = smoothed_y
-	direct_nn_dd_prob = DirectDataDrivenProblem(X, ẑ)
-	direct_nn_dd_prob2 = DirectDataDrivenProblem(X2, ẑ2)
-	direct_nn_dataset = DataDrivenDataset(direct_nn_dd_prob, direct_nn_dd_prob2)
-	#direct_nn_dd_prob = DirectDataDrivenProblem(X, n̂)
-end
-	
-
-# ╔═╡ 94507321-0db4-4247-82e2-2bde37b9e2c9
-begin
-	@variables v[1:2] i[1:1]
-	v = collect(v)
-	i = collect(i)
-	eqs_nn = [polynomial_basis(v, 2); i; v[1] .* i[1]]
-	basis_nn = Basis(eqs_nn, v, independent_variable = t, implicits=i)
-end
-
-# ╔═╡ 20632fcc-27cb-4de1-a000-0052a7e64d7c
-begin
-	res_nn_dd = solve(direct_nn_dataset, basis_nn, ImplicitOptimizer(),
-	            options = DataDrivenCommonOptions(data_processing = sampler, digits = 2))
-end
-
-# ╔═╡ f5d9dd44-8d6e-4919-8413-5dbe36c972d9
-plot([ẑ[1,:], ẑ2[1,:]])
-
-# ╔═╡ fe150d9d-858e-4e45-bc92-959f780647b2
-plot(res_nn_dd)
-
-# ╔═╡ b8c431b9-a3f0-43e3-b48e-32f4785e8d38
-eq = get_basis(res_nn_dd)
-
-# ╔═╡ 2b026507-7c26-42ae-9e1a-9ceafd546b64
-println(get_parameter_map(eq))
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -529,6 +572,7 @@ Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 SciMLSensitivity = "1ed8b502-d754-442c-8d5d-10ac956f44a1"
 SmoothingSplines = "102930c3-cf33-599f-b3b1-9a29a5acab30"
 StableRNGs = "860ef19b-820b-49d6-a774-d7a799459cd3"
+Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
@@ -549,6 +593,7 @@ Plots = "~1.40.5"
 SciMLSensitivity = "~7.63.1"
 SmoothingSplines = "~0.3.2"
 StableRNGs = "~1.0.2"
+Symbolics = "~5.28.0"
 Zygote = "~0.6.70"
 """
 
@@ -558,7 +603,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.4"
 manifest_format = "2.0"
-project_hash = "b995828263c5fbe94d9b22ca01805507f9c7b24a"
+project_hash = "e999b61b68c12027f49464490fc0d256ba8ce624"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "1f3835083f5b40fc01a3c87e64bc3275cf447481"
@@ -3574,15 +3619,20 @@ version = "1.4.1+1"
 # ╠═49891ff9-577b-4f0e-b792-df0c20b17a84
 # ╠═32567f8e-07df-46c7-ab17-aaaa20633005
 # ╠═c3330c5f-e055-4dc2-891b-bc3c106576ad
+# ╠═fc07655b-1c8d-4975-ba1f-38f783d56942
 # ╠═b580cb5b-98ae-4be1-9ac3-c6041c57872b
+# ╠═f26afbca-1fbf-4338-b3de-cd74e920f48d
 # ╠═afec829a-3e99-11ef-35e0-5171fe204979
 # ╠═fb56bbd4-e040-4e7c-92df-8149278593ab
-# ╠═23cead69-7494-4725-92de-09d9810a9da8
-# ╠═beb76aaa-dbf0-4ed6-989d-cb537fc907c6
+# ╟─23cead69-7494-4725-92de-09d9810a9da8
+# ╟─beb76aaa-dbf0-4ed6-989d-cb537fc907c6
 # ╟─132482c4-9694-4d3f-9896-5f71f44791f7
 # ╟─e7fc76d8-dcea-4e29-adb1-edef62db7b31
-# ╠═6f752720-dcd1-4f33-be2f-89cf4e88ebc9
-# ╠═744cfed2-9df3-4b14-8481-befe4d6e34fa
+# ╟─0c52ece6-2591-4485-a862-b836ad55dc08
+# ╟─6f752720-dcd1-4f33-be2f-89cf4e88ebc9
+# ╟─744cfed2-9df3-4b14-8481-befe4d6e34fa
+# ╟─fa95d93c-cf10-440c-b2b9-e35835dd3583
+# ╠═50e4ed7b-8d22-40e8-b1b1-bce0e09a180c
 # ╠═3e42e37d-bd87-4834-80f5-a18bac40a453
 # ╠═12ff5862-110c-4950-b499-18c91f11c5b3
 # ╠═5f439d4b-66b0-4ce2-83a0-b6a49f3b4f98
@@ -3592,37 +3642,35 @@ version = "1.4.1+1"
 # ╠═97cba982-c570-4cb1-baf5-60df81cbd750
 # ╠═05d03047-28eb-402e-9a88-cd14176cd94f
 # ╠═763bf04c-0a96-4f02-a6a3-73d7974517e2
-# ╠═9d14ebd8-6ef0-433e-af4b-f2f649f9a9a8
-# ╠═2b8e2efa-8212-4ed3-a291-cf7fa7eda8a6
-# ╠═577e721d-6213-46b8-8bdc-426499069f99
-# ╠═82face5a-fc45-4681-a197-26851dfec478
+# ╟─9d14ebd8-6ef0-433e-af4b-f2f649f9a9a8
+# ╟─01f2d129-c2b4-4dc4-af74-291a7257b799
+# ╠═c118c335-6557-448b-9869-2ec2381e5f1a
+# ╟─465bec25-bdb0-47ab-af49-04a52dda13a3
+# ╟─1d8b984b-9c34-4daf-992f-380bf90cf033
 # ╠═7c3488c8-b078-48cc-86e8-872a39fc84c4
-# ╟─be042a33-1696-4462-9436-7f8c8c6c74a6
-# ╟─a20e8de9-f8ce-4631-b1fa-c755b2ed76fe
-# ╟─a687ebf7-e8ac-408c-8c50-247c6d918ce4
-# ╟─10b2a138-a22e-42b1-87eb-a83f1def2df6
+# ╟─a45bfd37-1c02-4c17-b759-e40610850703
+# ╠═0be75291-f802-4acc-913c-52ae84fba37b
 # ╟─5e214b9f-8c74-4eb6-bd73-1c42d8421245
+# ╠═5ff8fdd1-8865-43e1-b369-6132fefd1bf3
 # ╠═c1d2cfca-6d26-4529-8cd6-b1989bd9910e
 # ╠═4e21647e-1ac7-4671-a698-19590f572544
 # ╠═ffa7e1a0-e2df-47d6-b7d1-b412d1bec6c7
-# ╠═f84f88a0-0a11-421e-813b-a495de6c7c68
-# ╠═959ba82a-1f4c-43ab-93c6-d59e81c2e921
-# ╠═1a44d03b-f283-412a-be2b-e385ee169d8c
-# ╠═bf1b55cb-be85-486f-aa71-a985f1da4577
+# ╟─298fb3a7-4e9e-40c0-8280-516a99b53ac3
+# ╟─7f28b497-d3a2-418a-babc-b54459be5458
+# ╟─40b13cd1-c099-4307-9385-655e5fa86867
+# ╟─294160be-a3e6-4de4-aa7e-d3ffcf09b848
+# ╟─93b0175d-0df2-44b9-b8fa-d6932343396a
+# ╟─3d54e24b-a38b-49c2-86fa-8c9469af3f45
+# ╟─a114c4b1-9fe3-44b3-9965-456284dba635
+# ╟─a821e50e-4de7-4c17-917b-de1b90c144f5
+# ╟─cb805420-39a1-409b-ae0f-6760353c3ad9
+# ╟─1e0a9f94-24ed-4893-87c0-c374bfdb36d5
+# ╟─8d14a58d-e79a-4717-a1ba-b71b52367e86
+# ╟─f84f88a0-0a11-421e-813b-a495de6c7c68
 # ╟─0d60a28f-0cd2-49d2-a826-9cf58d2a17a4
-# ╠═065bbb50-ad63-4416-8bf7-09939a66ef92
-# ╠═4059faf6-3b57-4f16-909b-5d66fadab66c
+# ╟─065bbb50-ad63-4416-8bf7-09939a66ef92
+# ╟─4059faf6-3b57-4f16-909b-5d66fadab66c
 # ╠═6a114bf5-1a21-4d9a-834c-a3559e57f4df
 # ╠═aee032d7-6956-4208-ae98-c5dac89bff61
-# ╠═2d63bb35-df93-40ea-9d40-8466428dd4c7
-# ╠═275d1001-a906-4b95-8bac-66c83f785800
-# ╠═4be22dba-a5d9-4c5e-beca-3d5908b36070
-# ╠═0757c87a-c4b4-4662-8923-a590369b5f72
-# ╠═94507321-0db4-4247-82e2-2bde37b9e2c9
-# ╠═20632fcc-27cb-4de1-a000-0052a7e64d7c
-# ╠═f5d9dd44-8d6e-4919-8413-5dbe36c972d9
-# ╠═fe150d9d-858e-4e45-bc92-959f780647b2
-# ╠═b8c431b9-a3f0-43e3-b48e-32f4785e8d38
-# ╠═2b026507-7c26-42ae-9e1a-9ceafd546b64
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
