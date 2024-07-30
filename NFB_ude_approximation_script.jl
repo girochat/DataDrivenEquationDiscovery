@@ -1,13 +1,3 @@
-#SBATCH --time=03:00:00
-#SBATCH --mem=10G
-#SBATCH --job-name=ude
-#SBATCH --mail-user=giliane.rochat@students.unibe.ch
-#SBATCH --mail-type=end,fail
-#SBATCH --output=/home/grochat/DataDrivenEquationDiscovery/log/output_ude_%j.o
-#SBATCH --error=/home/grochat/DataDrivenEquationDiscovery/log/error_ude_%j.e
-#SBATCH --partition=all
-#SBATCH --gres=gpu:rtx2080ti:1
-
 # SciML tools
 import DataDrivenDiffEq, DataDrivenSparse, OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
 
@@ -30,7 +20,7 @@ gr()
 if length(ARGS) < 2
     error("Error! You need to specify as arguments: \n-input concentration\n-Type of NFB (no/a/b/ab)")
 else
-    input_CC = ARGS[1]
+    input_CC = parse(Float64, ARGS[1])
     type_NFB = lowercase(ARGS[2])
 end
 
@@ -70,7 +60,7 @@ p_ = [0.5, 5, 5, 0.03, 0.1, 0.1,
 
 # Define and solve ODE problem
 prob = ModelingToolkit.ODEProblem(NFB!, u0, tspan, p_)
-X = OrdinaryDiffEq.§§>21solve(prob, OrdinaryDiffEq.Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
+X = OrdinaryDiffEq.solve(prob, OrdinaryDiffEq.Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
 
 # Add noise in terms of the mean
 x_g2p = Array(X)[2,begin:10:end]
@@ -82,7 +72,7 @@ xₙ_g2p = abs.(x_g2p .+ (noise_magnitude * x̄_g2p) .* randn(rng, eltype(x_g2p)
 
 data_plot = plot(X, alpha = 0.75, color = :blue, 
     label = string(type_NFB, " Ground truth"), idxs=2, title="g2p simulated data")
-scatter!(data_plot, time, xₙ_g2p_noFB, color = :blue, label = "Noisy Data", idxs=4)
+scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "Noisy Data", idxs=4)
 
 
 
