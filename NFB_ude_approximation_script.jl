@@ -5,12 +5,16 @@ import DataDrivenDiffEq, DataDrivenSparse, OrdinaryDiffEq, ModelingToolkit, SciM
 using Statistics, Plots, CSV, DataFrames, ComponentArrays
 
 # External libraries
-using Lux, Zygote, StableRNGs
+using Lux, LuxCUDA, Zygote, StableRNGs
 
 # Set a random seed for reproducibility
 rng = StableRNG(1112)
 
+# Explicitly call Plots backend
 gr()
+
+# Select GPU device if present
+gdev = gpu_device()
 
 
 
@@ -20,7 +24,7 @@ gr()
 if length(ARGS) < 2
     error("Error! You need to specify as arguments: \n-input concentration\n-Type of NFB (no/a/b/ab)")
 else
-    input_CC = parse(Float64, ARGS[1])
+    input_CC = parse(Float32, ARGS[1])
     type_NFB = lowercase(ARGS[2])
 end
 
@@ -50,13 +54,13 @@ function NFB!(du, u, p, t)
 end
 
 # Define time span and inital conditions of ODE problem
-u0 = repeat([0], 3)
-tspan = (0., 100.)
+u0 = cu(repeat(Float32[0], 3))
+tspan = (0.f0, 100.f0)
 
 # Define parameters
-p_ = [0.5, 5, 5, 0.03, 0.1, 0.1,
+p_ = cu(Float32[0.5, 5, 5, 0.03, 0.1, 0.1,
           0.1, 0.1, 0.1, 0.1, 1, 10,
-          0, 0, input_CC]
+          0, 0, input_CC])
 
 # Define and solve ODE problem
 prob = ModelingToolkit.ODEProblem(NFB!, u0, tspan, p_)
@@ -82,16 +86,20 @@ scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "Noisy Data", idxs=4)
 # Define a Multilayer FeedForward with Lux.jl
 rbf(x) = exp.(-(x .^ 2))
 const U = Lux.Chain(Lux.Dense(3, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 2))
+U_gpu = U |> gdev
 
 # Get the initial parameters and state variables of the model
-p, st = Lux.setup(rng, U)
-const _st = st
+p, st = Lux.setup(rng, U_gpu)
+p = p |> gdev
+const _st = st |> gdev
+
+
 
 # Define the hybrid model
 function ode_discovery!(du, u, p, t, p_true)
 
     # Estimate ODE solution with NN
-    û = U(u, p, _st)[1] 
+    û = U_gpu(u, p, _st)[1] 
     
     # Retrieve known parameters
     v1, v2, v3, v4, v5, v6 = p_true[1:6]
@@ -172,7 +180,7 @@ pl_trajectory = plot(ts, X̂[2,:], xlabel = "Time", ylabel = "x(t)", color = :re
 scatter!(time, xₙ_g2p, color = :black, label = "g2p Noisy data")
 
 # Compare unknown part approximated by NN with ground truth
-û = U(X̂, p_trained, _st)[1]
+û = U_gpu(X̂, p_trained, _st)[1]
 nn_plot = plot(ts, û[1,:], label="Û₁ approximated by NN", colour=:blue, title="NN approximation")
 plot!(nn_plot, ts, û[2,:], label="Û₂ approximated by NN", colour=:green)
 
