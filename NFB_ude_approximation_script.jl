@@ -1,14 +1,26 @@
+#SBATCH --time=03:00:00
+#SBATCH --mem=10G
+#SBATCH --job-name=ude
+#SBATCH --mail-user=giliane.rochat@students.unibe.ch
+#SBATCH --mail-type=end,fail
+#SBATCH --output=/home/grochat/DataDrivenEquationDiscovery/log/output_ude_%j.o
+#SBATCH --error=/home/grochat/DataDrivenEquationDiscovery/log/error_ude_%j.e
+#SBATCH --partition=all
+#SBATCH --gres=gpu:rtx2080ti:1
+
 # SciML tools
 import DataDrivenDiffEq, DataDrivenSparse, OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
 
+# Standard libraries
+using Statistics, Plots, CSV, DataFrames, ComponentArrays
+
 # External libraries
-import Lux, Zygote, Plots, CSV, StableRNGs, DataFrames,  ComponentArrays
+using Lux, Zygote, StableRNGs
 
 # Set a random seed for reproducibility
-rng = StableRNGs.StableRNG(1112)
+rng = StableRNG(1112)
 
-# Explicitly call the default backend for Plots
-Plots.gr()
+gr()
 
 
 
@@ -16,7 +28,7 @@ Plots.gr()
 
 # Retrieve file arguments
 if length(ARGS) < 2
-    error("Error! You need to specify as arguments: \n-input concentration\n-Type of NFB")
+    error("Error! You need to specify as arguments: \n-input concentration\n-Type of NFB (no/a/b/ab)")
 else
     input_CC = ARGS[1]
     type_NFB = lowercase(ARGS[2])
@@ -57,8 +69,8 @@ p_ = [0.5, 5, 5, 0.03, 0.1, 0.1,
           0, 0, input_CC]
 
 # Define and solve ODE problem
-prob = ODEProblem(NFB!, u0, tspan, p_)
-X = solve(prob, Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
+prob = ModelingToolkit.ODEProblem(NFB!, u0, tspan, p_)
+X = OrdinaryDiffEq.§§>21solve(prob, OrdinaryDiffEq.Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
 
 # Add noise in terms of the mean
 x_g2p = Array(X)[2,begin:10:end]
