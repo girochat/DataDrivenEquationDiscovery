@@ -5,7 +5,7 @@ import DataDrivenDiffEq, DataDrivenSparse, OrdinaryDiffEq, ModelingToolkit, SciM
 using Statistics, Plots, CSV, DataFrames, ComponentArrays
 
 # External libraries
-using Lux, LuxCUDA, Zygote, StableRNGs
+using Lux, Zygote, StableRNGs # LuxCUDA
 
 # Set a random seed for reproducibility
 rng = StableRNG(1112)
@@ -13,8 +13,6 @@ rng = StableRNG(1112)
 # Explicitly call Plots backend
 gr()
 
-# Select GPU device if present
-gdev = gpu_device()
 
 
 
@@ -25,6 +23,7 @@ if length(ARGS) < 2
     error("Error! You need to specify as arguments: \n-input concentration\n-Type of NFB (no/a/b/ab)")
 else
     input_CC = parse(Float32, ARGS[1])
+    println(input_CC)
     type_NFB = lowercase(ARGS[2])
 end
 
@@ -54,13 +53,13 @@ function NFB!(du, u, p, t)
 end
 
 # Define time span and inital conditions of ODE problem
-u0 = cu(repeat(Float32[0], 3))
+u0 = repeat(Float32[0], 3)
 tspan = (0.f0, 100.f0)
 
 # Define parameters
-p_ = cu(Float32[0.5, 5, 5, 0.03, 0.1, 0.1,
+p_ = Float32[0.5, 5, 5, 0.03, 0.1, 0.1,
           0.1, 0.1, 0.1, 0.1, 1, 10,
-          0, 0, input_CC])
+          0, 0, input_CC]
 
 # Define and solve ODE problem
 prob = ModelingToolkit.ODEProblem(NFB!, u0, tspan, p_)
@@ -86,20 +85,17 @@ scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "Noisy Data", idxs=4)
 # Define a Multilayer FeedForward with Lux.jl
 rbf(x) = exp.(-(x .^ 2))
 const U = Lux.Chain(Lux.Dense(3, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 2))
-U_gpu = U |> gdev
 
 # Get the initial parameters and state variables of the model
-p, st = Lux.setup(rng, U_gpu)
-p = p |> gdev
-const _st = st |> gdev
-
+p, st = Lux.setup(rng, U)
+const _st = st
 
 
 # Define the hybrid model
 function ode_discovery!(du, u, p, t, p_true)
 
     # Estimate ODE solution with NN
-    û = U_gpu(u, p, _st)[1] 
+    û = U(u, p, _st)[1] 
     
     # Retrieve known parameters
     v1, v2, v3, v4, v5, v6 = p_true[1:6]
@@ -128,7 +124,7 @@ prob_nn = ModelingToolkit.ODEProblem(nn_NFB!, u0, tspan, p)
 function predict(θ, T=time)
     _prob = ModelingToolkit.remake(prob_nn, p = θ)
     Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.Vern7(), saveat = T,
-        abstol = 1e-6, reltol = 1e-6, 
+        abstol = 1e-8, reltol = 1e-8, 
 		sensealg=SciMLSensitivity.QuadratureAdjoint(autojacvec=SciMLSensitivity.ReverseDiffVJP(true))))
 end
 
@@ -137,7 +133,7 @@ function loss(θ)
     mean(abs2, xₙ_g2p .- X̂[2,:])
 end
 
-losses = Float64[]
+losses = Float32[]
 callback = function (p, l)
     push!(losses, l)
     if length(losses) % 50 == 0
@@ -180,7 +176,7 @@ pl_trajectory = plot(ts, X̂[2,:], xlabel = "Time", ylabel = "x(t)", color = :re
 scatter!(time, xₙ_g2p, color = :black, label = "g2p Noisy data")
 
 # Compare unknown part approximated by NN with ground truth
-û = U_gpu(X̂, p_trained, _st)[1]
+û = U(X̂, p_trained, _st)[1]
 nn_plot = plot(ts, û[1,:], label="Û₁ approximated by NN", colour=:blue, title="NN approximation")
 plot!(nn_plot, ts, û[2,:], label="Û₂ approximated by NN", colour=:green)
 
@@ -195,15 +191,16 @@ elseif type_NFB == "b"
 elseif type_NFB == "ab"
     plot!(nn_plot, ts, X[3,:], label="U₁ and U₂ Ground truth", colour=:black, linestyle=:dash)
 end
+#savefig(nn_plot, "./Plots/$(filename)_nn_plot.svg")
 
 # Compare predicted state variables with their respective ground truth
-plot(ts, X̂[1,:], label="Predicted g1p", colour=:green, linewidth=2, title="Full model prediction")
-plot!(X.t, X[1,:], label="Ground truth g1p", linestyle=:dash, colour=:lightgreen, linewidth=2)
-plot!(ts, X̂[2,:], label="Predicted g2p", colour=:blue, linewidth=2)
-plot!(X.t, X[2,:], label="Ground truth g2p", linestyle=:dash, colour=:steelblue, linewidth=2)
-plot!(ts, X̂[3,:], label="Predicted Xact", colour=:red, linewidth=2)
-plot!(X.t, X[3,:], label="Ground truth Xact", colour=:pink, linewidth=2, linestyle=:dash)
-
+full_plot = plot(ts, X̂[1,:], label="Predicted g1p", colour=:green, linewidth=2, title="Full model prediction")
+plot!(full_plot, X.t, X[1,:], label="Ground truth g1p", linestyle=:dash, colour=:lightgreen, linewidth=2)
+plot!(full_plot, ts, X̂[2,:], label="Predicted g2p", colour=:blue, linewidth=2)
+plot!(full_plot, X.t, X[2,:], label="Ground truth g2p", linestyle=:dash, colour=:steelblue, linewidth=2)
+plot!(full_plot, ts, X̂[3,:], label="Predicted Xact", colour=:red, linewidth=2)
+plot!(full_plot, X.t, X[3,:], label="Ground truth Xact", colour=:pink, linewidth=2, linestyle=:dash)
+#savefig(full_plot, "./Plots/$(filename)_full_plot.svg")
 
 
 
