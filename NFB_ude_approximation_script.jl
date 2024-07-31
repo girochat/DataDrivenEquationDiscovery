@@ -30,6 +30,19 @@ end
 # Define which case (noFB, a, b, ab) to run the UDE approximation for
 string_CC = replace(string(input_CC), "." => "")
 filename = string("NFB_", type_NFB, "_", string_CC)
+if occursin("no", type_NFB)
+    x1=0
+    x2=0
+elseif type_NFB == "a"
+    x1=1
+    x2=0
+elseif type_NFB == "b"
+    x1=0
+    x2=1
+elseif type_NFB == "ab"
+    x1=1
+    x2=1
+end
 
 
 
@@ -59,7 +72,7 @@ tspan = (0.f0, 100.f0)
 # Define parameters
 p_ = Float32[0.5, 5, 5, 0.03, 0.1, 0.1,
           0.1, 0.1, 0.1, 0.1, 1, 10,
-          0, 0, input_CC]
+          x1, x2, input_CC]
 
 # Define and solve ODE problem
 prob = ModelingToolkit.ODEProblem(NFB!, u0, tspan, p_)
