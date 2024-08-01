@@ -137,13 +137,17 @@ prob_nn = ModelingToolkit.ODEProblem(nn_NFB!, u0, tspan, p)
 function predict(θ, T=time)
     _prob = ModelingToolkit.remake(prob_nn, p = θ)
     Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.Vern7(), saveat = T,
-        abstol = 1e-8, reltol = 1e-8, 
+        abstol = 1e-10, reltol = 1e-8, 
 		sensealg=SciMLSensitivity.QuadratureAdjoint(autojacvec=SciMLSensitivity.ReverseDiffVJP(true))))
 end
 
 function loss(θ)
     X̂ = predict(θ)
-    mean(abs2, xₙ_g2p .- X̂[2,:])
+	if length(X̂[2,:]) == length(xₙ_g2p)
+    	mean(abs2, xₙ_g2p .- X̂[2,:])
+	else
+		1000
+	end
 end
 
 losses = Float32[]
