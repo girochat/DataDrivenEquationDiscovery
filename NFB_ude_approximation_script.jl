@@ -22,7 +22,7 @@ gr()
 if length(ARGS) < 2
     error("Error! You need to specify as arguments: \n-input concentration\n-Type of NFB (no/a/b/ab)")
 else
-    input_CC = parse(Float32, ARGS[1])
+    input_CC = parse(Float64, ARGS[1])
     println(input_CC)
     type_NFB = lowercase(ARGS[2])
 end
@@ -66,8 +66,8 @@ function NFB!(du, u, p, t)
 end
 
 # Define time span and inital conditions of ODE problem
-u0 = repeat(Float32[0], 3)
-tspan = (0.f0, 100.f0)
+u0 = repeat(Float64[0], 3)
+tspan = (0.0, 100.0)
 
 # Define parameters
 p_ = Float32[0.5, 5, 5, 0.03, 0.1, 0.1,
@@ -136,7 +136,7 @@ prob_nn = ModelingToolkit.ODEProblem(nn_NFB!, u0, tspan, p)
 
 function predict(θ, T=time)
     _prob = ModelingToolkit.remake(prob_nn, p = θ)
-    Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.Vern7(), saveat = T,
+    Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.AutoVern7(OrdinaryDiffEq.Rodas5P()), saveat = T,
         abstol = 1e-10, reltol = 1e-8, 
 		sensealg=SciMLSensitivity.QuadratureAdjoint(autojacvec=SciMLSensitivity.ReverseDiffVJP(true))))
 end
@@ -150,7 +150,7 @@ function loss(θ)
 	end
 end
 
-losses = Float32[]
+losses = Float64[]
 callback = function (p, l)
     push!(losses, l)
     if length(losses) % 50 == 0
