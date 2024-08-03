@@ -25,11 +25,13 @@ else
     input_CC = parse(Float64, ARGS[1])
     println(input_CC)
     type_NFB = lowercase(ARGS[2])
+    println(type_NFB)
 end
 
 # Define which case (noFB, a, b, ab) to run the UDE approximation for
 string_CC = replace(string(input_CC), "." => "")
 filename = string("NFB_", type_NFB, "_", string_CC)
+println(filename)
 if occursin("no", type_NFB)
     x1=0
     x2=0
@@ -40,6 +42,7 @@ elseif type_NFB == "b"
     x1=0
     x2=1
 elseif type_NFB == "ab"
+    println("ab (ifelse)")
     x1=1
     x2=1
 end
@@ -70,7 +73,7 @@ u0 = repeat(Float64[0], 3)
 tspan = (0.0, 100.0)
 
 # Define parameters
-p_ = Float32[0.5, 5, 5, 0.03, 0.1, 0.1,
+p_ = Float64[0.5, 5, 5, 0.03, 0.1, 0.1,
           0.1, 0.1, 0.1, 0.1, 1, 10,
           x1, x2, input_CC]
 
