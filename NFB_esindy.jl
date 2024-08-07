@@ -7,22 +7,19 @@ using InteractiveUtils
 # ╔═╡ a806fdd2-5017-11ef-2351-dfc89f69b334
 begin
 	# SciML tools
-	import DataDrivenDiffEq, DataDrivenSparse, ModelingToolkit#, OrdinaryDiffEq, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
+	import DataDrivenDiffEq, DataDrivenSparse, ModelingToolkit, Symbolics#, OrdinaryDiffEq, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
 
 	# Standard libraries
 	using Statistics, Plots, CSV, DataFrames, Printf
 
 	# External libraries
-	using HyperTuning, StableRNGs
+	using HyperTuning, StableRNGs, Distributions
 
 	# Set a random seed for reproducibility
 	rng = StableRNG(1111)
 
 	gr()
 end
-
-# ╔═╡ 3c21ae1b-7128-457f-a4f1-76f312fffecd
-using Symbolics
 
 # ╔═╡ 9ebfadf0-b711-46c0-b5a2-9729f9e042ee
 md"""
@@ -80,7 +77,7 @@ end
 
 # ╔═╡ 74ad0ae0-4406-4326-822a-8f3e027077b3
 md"""
-##### Set up the library of functions
+##### Set up the SINDy library of functions and hyperparameters optimisation
 """
 
 # ╔═╡ 9dc0a251-a637-4144-b32a-7ebf5b86b6f3
@@ -146,24 +143,104 @@ begin
 	a_dd_prob = nfb_dd_prob(df_a[rand(1:nrow(df_a), nrow(df_a)),:])
 end
 
-# ╔═╡ 3a9b8cab-314f-4198-bd5c-f4300ebb5ba9
-#bootstrap_res2 = sindy_bootstrap(df_NGF, gf_basis, 1000, true)
+# ╔═╡ 74b2ade4-884b-479d-9fee-828d37d7ab47
+function compute_coef_stat(bootstrap_res, coef_threshold)
 
-# ╔═╡ 4e0292d0-abcb-49c7-a96b-a65dd39028cf
-begin
-	p = DataDrivenDiffEq.parameters(nfb_basis)
-	#Symbolics.hasmetadata(p, Symbolics.VariableDefaultValue)
-	#Symbolics.getdefaultval(p
-	#Symbolics.symtype(p)
-	#zero(Symbolics.symtype(p))
-	p => Float64[]
+	# Retrieve dimensions of the problem
+	n_eqs = size(bootstrap_res, 2)
+	n_terms = size(bootstrap_res, 3)
+
+	# Compute inclusion probabilities
+	inclusion_prob = (mean((bootstrap_res .!= 0), dims=1) * 100)
+
+	# Keep only elements of basis with probabilities above threshold
+	mask = inclusion_prob .> coef_threshold
+	masked_res = bootstrap_res .* mask
+
+	# Compute the mean and std of ensemble coefficients
+	m = zeros(Float64, n_eqs, n_terms)
+	sem = zeros(Float64, n_eqs, n_terms)
+	for i in 1:n_eqs
+		for j in 1:n_terms
+			m[i,j] = mean(filter(!iszero, masked_res[:,i,j]))
+			sem[i,j] = std(filter(!iszero, masked_res[:,i,j]))
+			sample_size = sum(.!(iszero.(masked_res[:,i,j])))
+			if sample_size != 0
+				sem[i,j] = sem[i,j] / sqrt(sample_size)
+			end
+		end
+	end
+	m[isnan.(m)] .= 0
+	sem[isnan.(sem)] .= 0
+
+	return (mean = m, SEM = sem)
 end
 
-# ╔═╡ c86eaa22-d78f-421a-b96e-e261a8f5e38e
-M = [DataDrivenDiffEq.equations(nfb_basis) DataDrivenDiffEq.equations(nfb_basis)]
+# ╔═╡ 97ae69f0-764a-4aff-88cd-91accf6bb3fd
+function build_equations(coef, basis)
+	
+	# Build equation
+	h = [equation.rhs for equation in DataDrivenDiffEq.equations(basis)]
+	final_eqs = [sum(row .* h) for row in eachrow(coef)]
 
-# ╔═╡ be1f9e56-749e-4f89-9ff0-994c766133d0
-M[1,1].rhs
+	# Build callable function and print equation
+	y = []
+	println("Estimated equation(s):")
+	for (i, eq) in enumerate(final_eqs)
+		println("y$(i) = $(eq)")
+		push!(y, Symbolics.build_function(eq, x[1:3], expression = Val{false}))
+	end
+	
+	return y
+end
+
+# ╔═╡ cc2395cc-00df-4e5e-8573-e85ce813fd41
+function plot_esindy(df, y, sem, basis, confidence)
+	
+	# Get the quantile corresponding to the confidence interval
+	Z = Normal()
+	if 0 <= confidence <= 1
+		q = quantile(Z, confidence)
+	else
+		q = quantile(Z, confidence/100)
+	end
+	y_sem = build_equations(sem, basis)
+
+	# Retrieve the number of samples
+	n_samples = sum(df.time .== 0)
+	size_sample = Int(nrow(df) / n_samples)
+	
+	n_eqs = size(y, 1)
+	println(n_eqs)
+	subplots = []
+	for i in 1:n_eqs
+		p = plot(title="Equation $(i)")
+		for sample in 0:(n_samples-1)
+			i_start = 1 + sample * size_sample
+			i_end = i_start + size_sample - 1
+			y_vals = y[i]([df.g1p_fit[i_start:i_end], 
+						   df.g2p_fit[i_start:i_end], 
+						   df.Xact_fit[i_start:i_end]])
+			if length(y_vals) == 1
+				y_vals = repeat([y_vals], size_sample)
+			end
+			sem_vals = y_sem[i]([df.g1p_fit[i_start:i_end], 
+						   df.g2p_fit[i_start:i_end], 
+						   df.Xact_fit[i_start:i_end]])
+			if length(y_vals) == 1
+				sem_vals = repeat([sem_vals], size_sample)
+			end
+			
+			plot!(p, df.time[i_start:i_end], y_vals, label="sample $(sample+1)", ribbon=q*sem_vals, fillalpha=0.3)
+		end
+		push!(subplots, p)
+	end
+	#main_p = plot(subplots[1], subplots[2], layout=(2,1), xlabel="Time", 
+		#		ylabel="Model species", 
+		#		plot_title="E-SINDy results", size=(600, 700))
+	
+	return subplots
+end
 
 # ╔═╡ cbb96770-2c31-4df3-b4a3-fa12726c9787
 # ╠═╡ disabled = true
@@ -182,23 +259,6 @@ function DataDrivenDiffEq.get_parameter_map(x::DataDrivenDiffEq.Basis)
     end
 end
   ╠═╡ =#
-
-# ╔═╡ b647aa93-adbe-4d5a-964d-2bbbd17d48da
-hasmetadata()
-
-# ╔═╡ 368f8da5-969d-4fa3-b846-3ad7e84e2ccb
-a = 2
-
-# ╔═╡ fcd4593c-a0b6-4f75-a2be-3a9835720ded
-#=╠═╡
-DataDrivenDiffEq.get_parameter_map(nfb_basis)
-  ╠═╡ =#
-
-# ╔═╡ d1bda257-26de-4915-af03-8838e7c9d910
-begin
-	[gf_h; gf_h .* i]
-	[nfb_h nfb_h]'
-end
 
 # ╔═╡ bfd08130-f81d-4f8a-937d-1591ae180d55
 gf_basis(ngf_dd_prob)
@@ -375,6 +435,7 @@ end
 # ╔═╡ 591eaad0-c1cd-40be-bc45-fcb9d9aaec9a
 begin
 	bootstrap_res = sindy_bootstrap(df_a, nfb_basis, 10, nfb_dd_prob)
+	#bootstrap_res2 = sindy_bootstrap(df_NGF, gf_basis, 1000, true)
 end
 
 # ╔═╡ 1722f69c-061d-4c20-9485-6b0222acf91e
@@ -383,77 +444,59 @@ begin
 	inclusion_prob = (mean((bootstrap_res .!= 0), dims=1) * 100)
 	
 	# Keep only elements of basis with probabilities above threshold
-	threshold = 95
+	threshold = 65
 	mask = inclusion_prob .> threshold
 
 	# Obtain the ensemble coefficients
 	e_coef = mean(bootstrap_res .* mask, dims=1)[1,:,:]
+
+	# Build equation
+	y = build_equations(e_coef, nfb_basis)
+	m, sem = compute_coef_stat(bootstrap_res, 95)
+	y_sem = build_equations(sem, nfb_basis)
+	
 end
 
-# ╔═╡ 014166da-25e7-44c9-a29f-f2ba7aa054a4
-e_coef * [h h]
+# ╔═╡ ab904bf6-80f6-4883-9b50-57ed1fa3d56a
+begin
+	subplots = []
+	y_vals = y[1]([df_a.g1p_fit[1:801], df_a.g2p_fit[1:801], df_a.Xact_fit[1:801]])
+	y_sem_vals = y_sem[1]([df_a.g1p_fit[1:801], df_a.g2p_fit[1:801], df_a.Xact_fit[1:801]])
+	p1 = plot(df_a.time[1:801], y_vals, ribbon=(20 .* y_sem_vals), fillalpha=0.3, label="Estimation")
+	plot!(p1, df_a.time[1:801], df_a.Xact_fit[1:801], title="Equation 1", label="Ground truth")
+	push!(subplots, p1)
+	y_vals2 = y[2]([df_a.g1p_fit[1:801], df_a.g2p_fit[1:801], df_a.Xact_fit[1:801]])
+	y_sem_vals2 = y_sem[2]([df_a.g1p_fit[1:801], df_a.g2p_fit[1:801], df_a.Xact_fit[1:801]])
+	p2 = plot(df_a.time[1:801], repeat([y_vals2], 801), ribbon=(20 .* y_sem_vals2), fillalpha=0.3, label="Estimation")
+	plot!(p2, df_a.time[1:801], repeat([1], 801), title="Equation 2", label="Ground truth", ylim=(0.95,1.1))
+	push!(subplots, p2)
+	
+	plot(p1, p2, layout=(2,1), size=(600, 800), xlabel="time")
+end
 
-# ╔═╡ b27b734f-9b82-4d85-926b-90f478b97880
-final_eq = e_coef .* [h h]'
+# ╔═╡ d6972449-4537-4065-957f-308941ee7148
+plot_esindy(df_a, y, sem, nfb_basis, 95)
 
 # ╔═╡ 012a5186-03aa-482d-bb62-ecba49587877
-function e_sindy(df, basis, dd_prob_func, n_bstrap, coef_threshold)
+function e_sindy(df, basis, dd_prob_func, n_bstrap, coef_threshold, confidence = 95)
 
 	# Run sindy bootstraps
-	bootstrap_res = sindy_bootstrap(df_a, nfb_basis, n_bstrap, nfb_dd_prob)
+	bootstrap_res = sindy_bootstrap(df, basis, n_bstrap, dd_prob_func)
 
-	n_eqs = size(bootstrap_res, 2)
+	# Compute the mean and std of ensemble coefficients
+	e_coef, coef_sem = compute_coef_stat(bootstrap_res, coef_threshold)
 
-	# Check for coefficients that are non-zero to compute inclusion probabilities
-	inclusion_prob = (mean((bootstrap_res .!= 0), dims=1) * 100)
+	# Build the final equation as callable functions
+	y = build_equations(e_coef, basis)
 
-	# Keep only elements of basis with probabilities above threshold
-	mask = inclusion_prob .> coef_threshold
-
-	# Obtain the ensemble coefficients
-	e_coef = mean(bootstrap_res .* mask, dims=1)[1,:,:]
-
-	final_eq = e_coef .* [nfb_h nfb_h]'
-
-	y1 = sum(final_eq[1,:])
-	#y2 = sum(final_eq[2,:])
+	# Plot result
+	plots = plot_esindy(df, y, coef_sem, confidence)
 	
-	return final_equations
+	return (equations = y, coef_mean = e_coef, coef_sem = coef_sem, plots=plots)
 end
 
-# ╔═╡ 49aa1792-479e-4473-8b3d-dd7a883618c7
-begin
-	y1 = sum(final_eq[1,:])
-	#y2 = sum(final_eq[2,:])
-	function eval_expr(expr, x_val)
-    	vectors = substitute(expr, Dict(x[3] => x_val)) |> Symbolics.value
-		return vectors[1] 
-	end
-	x_vals = [df_a.g1p_fit[1:801]  df_a.g2p_fit[1:801]  df_a.Xact_fit[1:801]]
-	#y1_vals = [eval_expr(y1, xi) for xi in eachrow(x_vals[:,3])]
-	y2_vals = [eval_expr(y2, xi) for xi in eachrow(x_vals[:,2])]
-	
-
-	time = 1:1:100
-	#@register_symbolic y1(x₃)
-	#f = eval(ModelingToolkit.build_function(y1, x))
-	#plot(z, f.(z))
-end
-
-# ╔═╡ a4fd06cf-3b29-4203-9bf5-7ba540a9a14a
-begin
-	b = [y1]
-	f_expr = build_function(b, [x[1], x[2], i[1]])
-	g = eval(f_expr[[1, 2, 3]])
-	#g([2.0])
-	
-end
-
-# ╔═╡ 398b841f-9adf-4e4e-85aa-c77b968c75be
-plot(1:801, y1_vals[:])
-
-# ╔═╡ 6043f0ea-f193-427a-a19e-7fd418b85943
-plot(1:801, y2_vals)
+# ╔═╡ f3077d61-cb49-4efb-aac0-66e8de6e15ae
+esindy_res = e_sindy(df_a, nfb_basis, nfb_dd_prob, 100, 95)
 
 # ╔═╡ 765eb367-b60e-49d0-9934-fbe77c417445
 # ╠═╡ disabled = true
@@ -584,6 +627,7 @@ CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataDrivenDiffEq = "2445eb08-9709-466a-b3fc-47e12bd697a2"
 DataDrivenSparse = "5b588203-7d8b-4fab-a537-c31a7f73f46b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 HyperTuning = "ddfa78db-9111-4329-a6bd-d4ed85ceb229"
 ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
@@ -597,6 +641,7 @@ CSV = "~0.10.14"
 DataDrivenDiffEq = "~1.4.1"
 DataDrivenSparse = "~0.1.2"
 DataFrames = "~1.6.1"
+Distributions = "~0.25.109"
 HyperTuning = "~0.1.2"
 ModelingToolkit = "~9.15.0"
 Plots = "~1.40.5"
@@ -610,7 +655,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.4"
 manifest_format = "2.0"
-project_hash = "c5e37a390a00a13193ba3b200f97cc4c1d0d4084"
+project_hash = "53b171b5a32b6c8314b07c80027f59e8cdd68728"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "aa4d425271a914d8c4af6ad9fccb6eb3aec662c7"
@@ -3161,50 +3206,41 @@ version = "1.4.1+1"
 
 # ╔═╡ Cell order:
 # ╟─9ebfadf0-b711-46c0-b5a2-9729f9e042ee
-# ╠═a806fdd2-5017-11ef-2351-dfc89f69b334
+# ╟─a806fdd2-5017-11ef-2351-dfc89f69b334
 # ╟─d6b1570f-b98b-4a98-b5e5-9d747930a5ab
 # ╟─666a20eb-8395-4859-ae70-aa8ea22c5c77
 # ╠═af06c850-2e8b-4b4b-9d0f-02e645a79743
 # ╟─b549bff5-d8e9-4f41-96d6-2d562584ccd9
 # ╠═f598564e-990b-436e-aa97-b2239b44f6d8
-# ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
+# ╠═74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
-# ╠═ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
+# ╟─ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
 # ╟─e81310b5-63e1-45b8-ba4f-81751d0fcc06
-# ╠═4646bfce-f8cc-4d24-b461-753daff50f71
+# ╟─4646bfce-f8cc-4d24-b461-753daff50f71
 # ╠═034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╠═cbee152c-0512-4a37-af12-5fda9d42791c
-# ╠═0f7076ef-848b-4b3c-b918-efb6419787be
-# ╟─6811f725-7bcb-482b-ac1d-4cd474bbeb9b
+# ╟─0f7076ef-848b-4b3c-b918-efb6419787be
+# ╠═6811f725-7bcb-482b-ac1d-4cd474bbeb9b
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
 # ╠═c7e825a3-8ce6-48fc-86ac-21810d32bbfb
 # ╠═83457168-c643-49d3-8e2c-f3679669ab60
 # ╠═3194564c-6889-455e-b5f3-98d2fa0aa810
 # ╠═ad7a7b10-161a-4532-88ed-6a41fe5f3e50
 # ╠═591eaad0-c1cd-40be-bc45-fcb9d9aaec9a
-# ╠═3a9b8cab-314f-4198-bd5c-f4300ebb5ba9
 # ╠═1722f69c-061d-4c20-9485-6b0222acf91e
+# ╟─74b2ade4-884b-479d-9fee-828d37d7ab47
+# ╟─97ae69f0-764a-4aff-88cd-91accf6bb3fd
+# ╟─ab904bf6-80f6-4883-9b50-57ed1fa3d56a
+# ╠═d6972449-4537-4065-957f-308941ee7148
+# ╟─cc2395cc-00df-4e5e-8573-e85ce813fd41
 # ╠═012a5186-03aa-482d-bb62-ecba49587877
-# ╠═4e0292d0-abcb-49c7-a96b-a65dd39028cf
-# ╠═c86eaa22-d78f-421a-b96e-e261a8f5e38e
-# ╠═be1f9e56-749e-4f89-9ff0-994c766133d0
+# ╠═f3077d61-cb49-4efb-aac0-66e8de6e15ae
 # ╠═cbb96770-2c31-4df3-b4a3-fa12726c9787
-# ╠═b647aa93-adbe-4d5a-964d-2bbbd17d48da
-# ╠═368f8da5-969d-4fa3-b846-3ad7e84e2ccb
-# ╠═fcd4593c-a0b6-4f75-a2be-3a9835720ded
-# ╠═014166da-25e7-44c9-a29f-f2ba7aa054a4
-# ╟─d1bda257-26de-4915-af03-8838e7c9d910
-# ╠═b27b734f-9b82-4d85-926b-90f478b97880
 # ╠═bfd08130-f81d-4f8a-937d-1591ae180d55
 # ╠═fc74c3c4-0e80-4bf6-8acd-61823a925a88
 # ╠═767f9e0c-5763-4c6c-a66d-d6b68f39a6ad
 # ╠═8460a7f6-caf0-4c7b-968b-450c67874efb
 # ╠═e15b5b95-afb0-4fc7-91f7-4e23e0ab3646
-# ╠═3c21ae1b-7128-457f-a4f1-76f312fffecd
-# ╠═a4fd06cf-3b29-4203-9bf5-7ba540a9a14a
-# ╠═49aa1792-479e-4473-8b3d-dd7a883618c7
-# ╠═398b841f-9adf-4e4e-85aa-c77b968c75be
-# ╠═6043f0ea-f193-427a-a19e-7fd418b85943
 # ╠═765eb367-b60e-49d0-9934-fbe77c417445
 # ╠═3d5dc36f-f4cc-458e-bdc9-bf8a182f6bce
 # ╠═ade5f931-5649-4717-8c15-d4f861dbdb91
