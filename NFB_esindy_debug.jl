@@ -11,15 +11,6 @@ begin
 	Pkg.Registry.status()
 end
 
-# ╔═╡ a5696976-2dfc-4e98-ae0b-571ab8c0e4c3
-using Revise
-
-# ╔═╡ c01b0a96-612a-48fd-a982-ebd5c259adc0
-begin
-	using DataDrivenDiffEq
-	using DataDrivenSparse
-end
-
 # ╔═╡ a806fdd2-5017-11ef-2351-dfc89f69b334
 begin
 	# SciML tools
@@ -29,8 +20,14 @@ begin
 	using Statistics, Plots, CSV, DataFrames, Printf
 
 	# External libraries
-	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, Logging
+	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, Logging, ColorSchemes
 
+	# Add Revise.jl before the Dev packages to track
+	using Revise
+
+	# Packages under development
+	using DataDrivenDiffEq, DataDrivenSparse
+	
 	# Set a random seed for reproducibility
 	rng = StableRNG(1111)
 
@@ -45,6 +42,7 @@ This notebook is about estimating the equation describing the unknown dynamics a
 
 # ╔═╡ 6b5db2ee-bb76-4617-b6b1-e7b6064b0fb9
 begin
+	# Mark bugging packages 
 	#Pkg.develop(Pkg.PackageSpec(name="DataDrivenDiffEq", uuid="5C42544C-9741-4B26-99DF-F196E0D3E510"))
 	#Pkg.develop(Pkg.PackageSpec(name="DataDrivenSparse", uuid="5b588203-7d8b-4fab-a537-c31a7f73f46a"))
 end
@@ -335,6 +333,7 @@ function build_equations(coef, basis)
 
 	# Build equation
 	h = [equation.rhs for equation in DataDrivenDiffEq.equations(basis)]
+	coef = 100 * coef
 	final_eqs = [sum(row .* h) for row in eachrow(coef)]
 
 	implicits = implicit_variables(basis)
@@ -365,7 +364,7 @@ function plot_esindy(data, y, sem, basis, confidence)
 	end
 
 	# Obtain the equations for the SEM
-	#y_sem = build_equations(sem, basis)
+	y_sem = build_equations(sem, basis)
 
 	# Retrieve the number of samples
 	n_samples = sum(data.time .== 0)
@@ -373,29 +372,30 @@ function plot_esindy(data, y, sem, basis, confidence)
 	
 	n_eqs = size(y, 1)
 	subplots = []
-	palette = :default
+	palette = colorschemes[:vik10]
 	for i in 1:n_eqs
 		
 		p = plot(title="Equation $(i)")
 		for sample in 0:(n_samples-1)
 			i_start = 1 + sample * size_sample
 			i_end = i_start + size_sample - 1
+			i_color = ceil(Int, 1 + sample * (length(palette) / n_samples))
 			
 			y_vals = [y[i](x) for x in eachrow([ngf_data.X[i_start:i_end,:] ngf_data.Y[i_start:i_end]])] 
 			if length(y_vals) == 1
 				y_vals = repeat([y_vals], size_sample)
 			end
 			
-			sem_vals = [y[1](x) for x in eachrow([ngf_data.X[i_start:i_end,:] ngf_data.Y[i_start:i_end]])] 
+			sem_vals = [y_sem[1](x) for x in eachrow([ngf_data.X[i_start:i_end,:] ngf_data.Y[i_start:i_end]])] 
 			if length(sem_vals) == 1
 				sem_vals = repeat([sem_vals], size_sample)
 			end
 
-			plot!(p, ngf_data.time[i_start:i_end], y_vals, label="SINDy (sample $(sample+1))")#, ribbon=q*sem_vals, fillalpha=0.3)#, color=palette[i+1])
+			plot!(p, ngf_data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color], linestyle=:dash, ribbon=q*sem_vals, fillalpha=0.3)
 
-			plot!(p, ngf_data.time[i_start:i_end], ngf_data.GT[i_start:i_end],
-			linestyle=:dash, label="GT")
+			plot!(p, ngf_data.time[i_start:i_end], ngf_data.GT[i_start:i_end], label="", color=palette[i_color])
 		end
+		plot!(p, [], [],  label="GT", color=:black)
 		push!(subplots, p)
 	end
 	#main_p = plot(subplots[1], subplots[2], layout=(2,1), xlabel="Time", 
@@ -429,7 +429,7 @@ md"""
 """
 
 # ╔═╡ cd655445-6bf6-4aee-8968-e324ea66601d
-res = sindy_bootstrap(ngf_data, gf_basis, 1)
+res = sindy_bootstrap(ngf_data, gf_basis, 10)
 
 # ╔═╡ 689cd930-e06d-4077-a433-88430ed2079a
 begin
@@ -444,15 +444,16 @@ res = sindy_bootstrap(ngf_data, gf_basis, 10)
   ╠═╡ =#
 
 # ╔═╡ c6e9f4ae-bb48-4f4e-88e5-165e8d1f3c8e
-e_coef, coef_sem = compute_coef_stat(res, 65)
+e_coef, coef_sem = compute_coef_stat(res, 25)
+
+# ╔═╡ 7e77aaef-6af2-4649-8456-e838c1d0b948
+
 
 # ╔═╡ 50f61ebc-5788-403d-bb62-010abbd1e618
 begin
 	# Build equation
 	h = [equation.rhs for equation in DataDrivenDiffEq.equations(gf_basis)]
 	final_eqs = [sum(row .* h) for row in eachrow(e_coef)]
-
-	println(final_eqs[1])
 
 	implicits = implicit_variables(gf_basis)
 	final_eqs = ModelingToolkit.solve_for(final_eqs, implicits)
@@ -466,11 +467,17 @@ begin
 	end
 end
 
-# ╔═╡ 0ef4979a-aa1a-48b4-b347-9b71d84e66b3
-p = plot_esindy(ngf_data, y, coef_sem, gf_basis, 95)
+# ╔═╡ 23a1140b-f452-40e7-ba98-819c84ec1abd
+begin
+	sem_eq = [sum(row .* h) for row in eachrow(coef_sem)]
+	sem_eq = ModelingToolkit.solve_for(sem_eq, implicits)
+end
 
-# ╔═╡ f2e7f963-ba4a-44b7-a24c-313269780a0e
-plot(p[1])
+# ╔═╡ 0ef4979a-aa1a-48b4-b347-9b71d84e66b3
+begin
+	p = plot_esindy(ngf_data, y, coef_sem, gf_basis, 99.999)
+	plot(p[1])
+end
 
 # ╔═╡ 77c1d355-8a7e-414e-9e0e-8eda1fbbbf1d
 md"""
@@ -568,17 +575,15 @@ esindy_res_ab.coef_mean
 # ╔═╡ Cell order:
 # ╟─9ebfadf0-b711-46c0-b5a2-9729f9e042ee
 # ╠═b9ff1932-20ef-48da-9d2d-d61f3ee13a4f
-# ╠═a5696976-2dfc-4e98-ae0b-571ab8c0e4c3
-# ╠═c01b0a96-612a-48fd-a982-ebd5c259adc0
-# ╠═a806fdd2-5017-11ef-2351-dfc89f69b334
 # ╠═6b5db2ee-bb76-4617-b6b1-e7b6064b0fb9
+# ╠═a806fdd2-5017-11ef-2351-dfc89f69b334
 # ╟─d6b1570f-b98b-4a98-b5e5-9d747930a5ab
 # ╟─666a20eb-8395-4859-ae70-aa8ea22c5c77
 # ╟─af06c850-2e8b-4b4b-9d0f-02e645a79743
 # ╟─b549bff5-d8e9-4f41-96d6-2d562584ccd9
 # ╟─f598564e-990b-436e-aa97-b2239b44f6d8
 # ╟─f21876f0-3124-40ad-ad53-3a53efe77040
-# ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
+# ╠═6c7929f5-15b2-4e19-8c26-e709f0da182e
 # ╟─5f0fb956-7c84-4ff2-944f-e9ddfccab748
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
@@ -592,19 +597,20 @@ esindy_res_ab.coef_mean
 # ╠═034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╠═0f7076ef-848b-4b3c-b918-efb6419787be
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
-# ╠═c7e825a3-8ce6-48fc-86ac-21810d32bbfb
+# ╟─c7e825a3-8ce6-48fc-86ac-21810d32bbfb
 # ╟─74b2ade4-884b-479d-9fee-828d37d7ab47
-# ╟─97ae69f0-764a-4aff-88cd-91accf6bb3fd
+# ╠═97ae69f0-764a-4aff-88cd-91accf6bb3fd
 # ╠═cc2395cc-00df-4e5e-8573-e85ce813fd41
 # ╠═012a5186-03aa-482d-bb62-ecba49587877
 # ╟─569c7600-246b-4a64-bba5-1e74a5888d8c
-# ╠═cd655445-6bf6-4aee-8968-e324ea66601d
+# ╟─cd655445-6bf6-4aee-8968-e324ea66601d
 # ╟─689cd930-e06d-4077-a433-88430ed2079a
 # ╠═f27a340f-8d78-4e8a-8606-82c7e85e50fc
 # ╠═c6e9f4ae-bb48-4f4e-88e5-165e8d1f3c8e
+# ╠═23a1140b-f452-40e7-ba98-819c84ec1abd
+# ╠═7e77aaef-6af2-4649-8456-e838c1d0b948
 # ╠═50f61ebc-5788-403d-bb62-010abbd1e618
 # ╠═0ef4979a-aa1a-48b4-b347-9b71d84e66b3
-# ╠═f2e7f963-ba4a-44b7-a24c-313269780a0e
 # ╟─77c1d355-8a7e-414e-9e0e-8eda1fbbbf1d
 # ╟─f3077d61-cb49-4efb-aac0-66e8de6e15ae
 # ╟─d10c9991-ada5-4239-8b1a-5d9baaf27a1a
