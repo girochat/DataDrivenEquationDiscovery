@@ -231,6 +231,7 @@ plot!(full_plot, X.t, X[3,:], label="Ground truth Xact", colour=:pink, linewidth
 
 
 
+
 ##### Save results #####
 
 # Save NN approximation with the fitted and GT ODE solution for equation discovery
