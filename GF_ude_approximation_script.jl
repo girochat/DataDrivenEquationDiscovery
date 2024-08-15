@@ -26,7 +26,7 @@ if length(ARGS) < 4
         - Pulse frequency (Note: enter 100 for only one pulse)")
 else
     println("Running UDE approximation of EGF/NGF model for:")
-    CC = ucfirst(lowercase(ARGS[1]))
+    CC = uppercasefirst(lowercase(ARGS[1]))
     GF = lowercase(ARGS[2])
     pulse_duration = parse(Int, ARGS[3])
     pulse_frequency = parse(Int, ARGS[4])
