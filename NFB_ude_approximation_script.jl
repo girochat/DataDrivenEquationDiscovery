@@ -1,5 +1,5 @@
 # SciML tools
-import DataDrivenDiffEq, DataDrivenSparse, OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
+import OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches #DataDrivenDiffEq, DataDrivenSparse,
 
 # Standard libraries
 using Statistics, Plots, CSV, DataFrames, ComponentArrays
@@ -8,7 +8,7 @@ using Statistics, Plots, CSV, DataFrames, ComponentArrays
 using Lux, Zygote, StableRNGs # LuxCUDA
 
 # Set a random seed for reproducibility
-rng = StableRNG(1112)
+rng = StableRNG(1111)
 
 # Explicitly call Plots backend
 gr()
@@ -16,14 +16,15 @@ gr()
 
 
 
-### USER-DEFINED parameters
+##### USER-DEFINED parameters #####
 
 # Retrieve file arguments
 if length(ARGS) < 2
     error("Error! You need to specify as arguments: \n-input concentration\n-Type of NFB (no/a/b/ab)")
 else
+    println("")
     input_CC = parse(Float64, ARGS[1])
-    println(input_CC)
+    
     type_NFB = lowercase(ARGS[2])
     println(type_NFB)
 end
@@ -42,14 +43,13 @@ elseif type_NFB == "b"
     x1=0
     x2=1
 elseif type_NFB == "ab"
-    println("ab (ifelse)")
     x1=1
     x2=1
 end
 
 
 
-##### Simulate data with noise #####
+##### Define ODE system #####
 
 # Define negative feedback ODE system function
 function NFB!(du, u, p, t)
@@ -77,6 +77,11 @@ p_ = Float64[0.5, 5, 5, 0.03, 0.1, 0.1,
           0.1, 0.1, 0.1, 0.1, 1, 10,
           x1, x2, input_CC]
 
+
+
+
+##### Simulate data with noise #####
+
 # Define and solve ODE problem
 prob = ModelingToolkit.ODEProblem(NFB!, u0, tspan, p_)
 X = OrdinaryDiffEq.solve(prob, OrdinaryDiffEq.Vern7(), abstol = 1e-12, reltol = 1e-12, saveat = 0.125)
@@ -89,9 +94,9 @@ x̄_g2p = mean(x_g2p, dims = 1)
 noise_magnitude = 5e-3
 xₙ_g2p = abs.(x_g2p .+ (noise_magnitude * x̄_g2p) .* randn(rng, eltype(x_g2p), size(x_g2p)))
 
-data_plot = plot(X, alpha = 0.75, color = :blue, 
-    label = string(type_NFB, " Ground truth"), idxs=2, title="g2p simulated data")
-scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "Noisy Data", idxs=4)
+#data_plot = plot(X, alpha = 0.75, color = :blue, 
+#    label = string(type_NFB, " Ground truth"), idxs=2, title="g2p simulated data")
+#scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "Noisy Data", idxs=4)
 
 
 
@@ -120,9 +125,9 @@ function ode_discovery!(du, u, p, t, p_true)
     
     # Define ODE system with unknown part
     du[1] = v1 * input * (1-u[1]) / (k1 + (1-u[1])) - 
-            (v2 * u[1] / (k2 + u[1])) * û[1] #(1 + α * (u[3] - 1))
+            (v2 * u[1] / (k2 + u[1])) * û[1]    # Ground truth : (1 + α * (u[3] - 1))
     du[2] = v3 * u[1] * (1-u[2]) / (k3 + (1-u[2])) - 
-            (v4 * u[2] / (k4 + u[2])) * û[2] #(1 + β * (u[3] - 1))
+            (v4 * u[2] / (k4 + u[2])) * û[2]    # Ground truth : (1 + β * (u[3] - 1))
     du[3] = v5 * u[2] * (1-u[3]) / (k5 + (1-u[3])) - (v6 * u[3] / (k6 + u[3]))
 end
 
@@ -140,7 +145,7 @@ prob_nn = ModelingToolkit.ODEProblem(nn_NFB!, u0, tspan, p)
 function predict(θ, T=time)
     _prob = ModelingToolkit.remake(prob_nn, p = θ)
     Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.AutoVern7(OrdinaryDiffEq.Rodas5P()), saveat = T,
-        abstol = 1e-10, reltol = 1e-8, 
+        abstol = 1e-10, reltol = 1e-10, 
 		sensealg=SciMLSensitivity.QuadratureAdjoint(autojacvec=SciMLSensitivity.ReverseDiffVJP(true))))
 end
 
@@ -163,7 +168,7 @@ callback = function (p, l)
 end
 #----------------------------------------------------------
 
-# Define
+# Define the optimisation problem (auto-differentiation method to compute gradient)
 adtype = Optimization.AutoZygote()
 optf = Optimization.OptimizationFunction((x, p) -> loss(x), adtype)
 optprob1 = Optimization.OptimizationProblem(optf, ComponentVector{Float64}(p))
@@ -192,8 +197,10 @@ ts = first(X.t):(mean(diff(X.t))):last(X.t)
 X̂ = predict(p_trained, ts)
 
 # Trained on noisy data vs real solution
-pl_trajectory = plot(ts, X̂[2,:], xlabel = "Time", ylabel = "x(t)", color = :red, label = "g2p Approximation", linewidth=2, title="g2p fitting")
-scatter!(time, xₙ_g2p, color = :black, label = "g2p Noisy data")
+data_plot = plot(ts, X̂[2,:], xlabel = "Time", ylabel = "x(t)", color = :black, label = "g2p Approximation", linewidth=2, title="g2p fitting")
+plot!(data_plot, X, alpha = 0.75, color = :blue, label = "g2p GT", idxs=2)
+scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "g2p Noisy data")
+#savefig(data_plot, "./Plots/$(filename)_data_plot.svg")
 
 # Compare unknown part approximated by NN with ground truth
 û = U(X̂, p_trained, _st)[1]
