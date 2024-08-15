@@ -1,14 +1,14 @@
 # SciML tools
-import OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches #DataDrivenDiffEq, DataDrivenSparse,
+import OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
 
 # Standard libraries
 using Statistics, Plots, CSV, DataFrames, ComponentArrays
 
 # External libraries
-using Lux, Zygote, StableRNGs # LuxCUDA
+using Lux, Zygote, StableRNGs
 
 # Set a random seed for reproducibility
-rng = StableRNG(1112)
+rng = StableRNG(1111)
 
 # Explicitly call Plots backend
 gr()
@@ -62,7 +62,7 @@ end
 
 # Define the signal function
 f_signal(t) = sum(tanh(100(t - i))/2 - tanh(100(t - (i + pulse_duration))) / 2 for i in range(0, stop=100, step=(pulse_frequency + pulse_duration)))
-@ModelingToolkit.register_symbolic f_signal(t)
+@Symbolics.register_symbolic f_signal(t)
 
 
 
@@ -277,19 +277,14 @@ p_trained = res2.u
 ts = first(X.t):(mean(diff(X.t))):last(X.t)
 X̂ = predict(p_trained, ts)
 
-# Trained on noisy data vs real solution
-data_plot = plot(ts, X̂[5,:], xlabel = "t", ylabel = "x(t), y(t)", color = :red, label = "ERK UDE Approximation")
-scatter!(data_plot, time, xₙ_ERK, color = :black, label = "ERK Noisy data")
-#savefig(data_plot, "./Plots/$(filename)_data_plot.svg")
-
-# Compare unknown part approximated by NN with ground truth
+# Estimate UDE unknown part
 û = U(X̂, p_trained, _st)[1]
 
 # Establish ground truth for unkown part of ODE system
 u = (p_fix[10] .* X[7,:] .* (1 .- X[3,:]) ./ (p_fix[15] .+ (1 .- X[3,:])))
 
 # Plot the simulated data, trained solution and ground truth ERK dynamics
-p1 = plot(X, color = :skyblue, linewidth=8, label = "Ground truth ERK", idxs=5)
+p1 = plot(X, color = :skyblue, linewidth=8, label = "ERK Ground truth", idxs=5)
 plot!(p1, ts, X̂[5,:], xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), color = :black, linewidth=2, label = "ERK Approximation (UDE)", title="Fitted ERK dynamics after $(GF) stimulation")
 scatter!(p1, time, xₙ_ERK, color = :darkorange, alpha=0.75, label = "Noisy ERK Data")
 
@@ -326,8 +321,8 @@ plot!(X.t, X[7,:], label="Ground truth", colour=:black, linewidth=2, linestyle=:
 
 # Final multipanel plot
 full_plot = plot(R_plot, Ras_plot, Raf_plot, MEK_plot, NFB_plot, PFB_plot, layout=(3,2), size=(800, 1000))
-
 #savefig(full_plot, "./Plots/$(filename)_full_plot.svg")
+
 
 
 
@@ -359,5 +354,3 @@ df = DataFrame((
     NFB_GT=X[6,:],
     PFB_GT=X[7,:]))
 CSV.write("./Data/$(filename).csv", df, header=true)
-
-
