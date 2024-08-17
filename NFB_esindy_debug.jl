@@ -126,19 +126,6 @@ md"""
 ###### -EGF/NGF model
 """
 
-# ╔═╡ f598564e-990b-436e-aa97-b2239b44f6d8
-begin
-	# Load the NGF model estimations for various pulse regimes
-	files = ["ngf_highCC_10m_10v.csv" "ngf_highCC_10m_3pulse.csv" "ngf_highCC_3m_20v.csv" "ngf_highCC_10m.csv" "ngf_highCC_3m_3v.csv" "ngf_lowCC_10m_10v.csv"]
-	ngf_df = CSV.read("./Data/$(files[1])", DataFrame)
-	if length(files) > 1
-	    for i in 2:length(files)
-	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
-	        ngf_df = vcat(ngf_df, df2)
-	    end
-	end
-end
-
 # ╔═╡ 6c7929f5-15b2-4e19-8c26-e709f0da182e
 function create_gf_data(df, labels = [], smoothing=0.)
 
@@ -172,10 +159,43 @@ function create_gf_data(df, labels = [], smoothing=0.)
 end
 
 # ╔═╡ 447a8dec-ae5c-4ffa-b672-4f829c23eb1f
+function make_gf_labels(files)
+	labels = []
+	for file in files
+		words = split(file, ".")
+		words = split(words[1], "_")
+		label = ""
+		for word in words
+			if occursin("CC", word)
+				label = label * uppercasefirst(word) * " "
+			elseif occursin("m", word)
+				label = label * filter(isdigit, word) * "'"
+			elseif occursin("v", word)
+				label = label * "/" * filter(isdigit, word) * "'"
+			elseif occursin("pulse", word)
+				label = label * " (" * filter(isdigit, word) * "x)"
+			end
+		end
+		push!(labels, label)
+	end
+	return labels
+end
 
-
-# ╔═╡ 5f0fb956-7c84-4ff2-944f-e9ddfccab748
-ngf_data = create_gf_data(ngf_df, ["High CC 10'/10'" "HighCC 10' (3x)" "High CC 3'/20'" "High CC 10'" "High CC 3'/3'" "Low CC 10'/10'"], 300.)
+# ╔═╡ f598564e-990b-436e-aa97-b2239b44f6d8
+begin
+	# Load the NGF model estimations for various pulse regimes
+	files = ["ngf_highCC_10m_10v.csv" "ngf_highCC_10m_3pulse.csv" "ngf_highCC_3m_20v.csv" "ngf_highCC_10m.csv" "ngf_highCC_3m_3v.csv" "ngf_lowCC_10m_10v.csv"]
+	
+	ngf_df = CSV.read("./Data/$(files[1])", DataFrame)
+	if length(files) > 1
+	    for i in 2:length(files)
+	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
+	        ngf_df = vcat(ngf_df, df2)
+	    end
+	end
+	ngf_labels = make_gf_labels(files)
+		ngf_data = create_gf_data(ngf_df, ngf_labels, 300.)
+end
 
 # ╔═╡ 74ad0ae0-4406-4326-822a-8f3e027077b3
 md"""
@@ -631,10 +651,9 @@ end
 # ╟─f21876f0-3124-40ad-ad53-3a53efe77040
 # ╠═b2fa5d37-a681-4d81-bdf4-38238a6c5d85
 # ╟─b549bff5-d8e9-4f41-96d6-2d562584ccd9
-# ╠═f598564e-990b-436e-aa97-b2239b44f6d8
 # ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
-# ╠═447a8dec-ae5c-4ffa-b672-4f829c23eb1f
-# ╠═5f0fb956-7c84-4ff2-944f-e9ddfccab748
+# ╟─447a8dec-ae5c-4ffa-b672-4f829c23eb1f
+# ╠═f598564e-990b-436e-aa97-b2239b44f6d8
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
 # ╟─ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
