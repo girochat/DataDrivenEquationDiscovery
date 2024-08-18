@@ -8,7 +8,7 @@ using InteractiveUtils
 begin 
 	import Pkg
 	Pkg.activate(".")
-	Pkg.Registry.status()
+	#Pkg.Registry.status()
 end
 
 # ╔═╡ a806fdd2-5017-11ef-2351-dfc89f69b334
@@ -20,7 +20,7 @@ begin
 	using Statistics, Plots, CSV, DataFrames, Printf
 
 	# External libraries
-	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, Logging, ColorSchemes, JLD2
+	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ProgressLogging, ColorSchemes, JLD2
 
 	# Add Revise.jl before the Dev packages to track
 	using Revise
@@ -194,7 +194,7 @@ begin
 	    end
 	end
 	ngf_labels = make_gf_labels(files)
-		ngf_data = create_gf_data(ngf_df, ngf_labels, 300.)
+	ngf_data = create_gf_data(ngf_df, ngf_labels, 300.)
 end
 
 # ╔═╡ 74ad0ae0-4406-4326-822a-8f3e027077b3
@@ -291,16 +291,12 @@ md"""
 # Bootstrapping function that estimate optimal library coefficients given data
 function sindy_bootstrap(data, basis, n_bstraps)
 
-	# Initiate the 
+	# Initialise the coefficient array
 	n_eqs = size(data.Y, 2)
 	l_basis = length(basis)
 	bootstrap_coef = zeros(n_bstraps, n_eqs, l_basis)
 
-	for i in 1:n_bstraps
-
-		if mod(i, 10) == 0
-			println("Bootstrap $(i)/$(n_bstraps)")
-		end
+	@progress name="Bootstrapping" threshold=0.01 for i in 1:n_bstraps
 
 		# Define data driven problem with bootstrapped data
 		rand_ind = rand(1:size(data.X, 1), size(data.X, 1))
@@ -419,7 +415,7 @@ function plot_esindy(data, y, ci_coef, basis, confidence)
 	# Plot results with CI
 	n_eqs = size(y, 1)
 	subplots = []
-	palette = colorschemes[:seaborn_colorblind]
+	palette = colorschemes[:seaborn_colorblind] # [:vik10]
 	for i in 1:n_eqs
 		
 		if n_eqs > 1
@@ -479,10 +475,7 @@ md"""
 """
 
 # ╔═╡ b73f3450-acfd-4b9e-9b7f-0f7289a62976
-# ╠═╡ disabled = true
-#=╠═╡
-ngf_results_full = sindy_bootstrap(ngf_data, gf_basis, 1) #e_sindy(ngf_data, gf_basis, 10, 15, 95) 
-  ╠═╡ =#
+ngf_results_full = sindy_bootstrap(ngf_data, gf_basis, 10) #e_sindy(ngf_data, gf_basis, 10, 15, 95) 
 
 # ╔═╡ 53bc1c92-cf25-4de0-99f2-9bdaa754ea18
 # ╠═╡ disabled = true
@@ -648,12 +641,12 @@ end
 # ╟─d6b1570f-b98b-4a98-b5e5-9d747930a5ab
 # ╟─666a20eb-8395-4859-ae70-aa8ea22c5c77
 # ╟─af06c850-2e8b-4b4b-9d0f-02e645a79743
-# ╟─f21876f0-3124-40ad-ad53-3a53efe77040
+# ╠═f21876f0-3124-40ad-ad53-3a53efe77040
 # ╠═b2fa5d37-a681-4d81-bdf4-38238a6c5d85
 # ╟─b549bff5-d8e9-4f41-96d6-2d562584ccd9
 # ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
 # ╟─447a8dec-ae5c-4ffa-b672-4f829c23eb1f
-# ╠═f598564e-990b-436e-aa97-b2239b44f6d8
+# ╟─f598564e-990b-436e-aa97-b2239b44f6d8
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
 # ╟─ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
