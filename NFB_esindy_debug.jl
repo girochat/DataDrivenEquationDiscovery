@@ -8,7 +8,6 @@ using InteractiveUtils
 begin 
 	import Pkg
 	Pkg.activate(".")
-	#Pkg.Registry.status()
 end
 
 # ╔═╡ a806fdd2-5017-11ef-2351-dfc89f69b334
@@ -20,7 +19,7 @@ begin
 	using StatsBase, Plots, CSV, DataFrames, Printf
 
 	# External libraries
-	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ProgressLogging, ColorSchemes, JLD2, StatsBase
+	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ProgressLogging, ColorSchemes, JLD2
 
 	# Add Revise.jl before the Dev packages to track
 	#using Revise
@@ -36,8 +35,15 @@ end
 
 # ╔═╡ 9ebfadf0-b711-46c0-b5a2-9729f9e042ee
 md"""
-### Equation discovery with E-SINDy
-This notebook is about estimating the equation describing the unknown dynamics approximated by the neural network. It uses the Ensemble SINDy approach described in "Discovering governing equations from data by sparse identification of nonlinear dynamical systems" by Brunton et al. (2016).
+# Equation discovery with E-SINDy
+This notebook contains the code to implement the E-SINDy algorithms as presented in "Discovering governing equations from data by sparse identification of nonlinear dynamical systems" by Brunton et al. (2016), [DOI](https://doi.org/10.1098/rspa.2021.0904). It was designed to estimate the algebraic formula of an unknown function approximated by a neural network in the context of an ODE system. Two different signalling pathways, and corresponding ODE systems, were considered that generated the data used in this notebook:
+- Simple Negative Feedback Loop model (NFB) of two phosphatases g1p and g2p (Chapter 12: Parameter Estimation, Sloppiness, and Model Identifiability in "Quantitative Biology: Theory, Computational Methods and Examples of Models" by D. Daniels, M. Dobrzyński, D. Fey (2018)).
+- ERK activation dynamics model (ERK) as described in "Frequency modulation of ERK activation dynamics rewires cell fate" by H. Ryu et al. (2015).
+"""
+
+# ╔═╡ 6024651c-85f6-4e53-be0f-44f658cf9c77
+md"""
+##### Notebook Set-up 
 """
 
 # ╔═╡ 6b5db2ee-bb76-4617-b6b1-e7b6064b0fb9
@@ -681,9 +687,10 @@ esindy_res_ab.coef_mean
 
 # ╔═╡ Cell order:
 # ╟─9ebfadf0-b711-46c0-b5a2-9729f9e042ee
-# ╠═b9ff1932-20ef-48da-9d2d-d61f3ee13a4f
+# ╟─6024651c-85f6-4e53-be0f-44f658cf9c77
+# ╟─b9ff1932-20ef-48da-9d2d-d61f3ee13a4f
 # ╟─6b5db2ee-bb76-4617-b6b1-e7b6064b0fb9
-# ╠═a806fdd2-5017-11ef-2351-dfc89f69b334
+# ╟─a806fdd2-5017-11ef-2351-dfc89f69b334
 # ╟─d6b1570f-b98b-4a98-b5e5-9d747930a5ab
 # ╟─666a20eb-8395-4859-ae70-aa8ea22c5c77
 # ╟─af06c850-2e8b-4b4b-9d0f-02e645a79743
