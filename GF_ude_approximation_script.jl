@@ -1,5 +1,5 @@
 # SciML tools
-import OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
+import OrdinaryDiffEq, Symbolics, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
 
 # Standard libraries
 using Statistics, Plots, CSV, DataFrames, ComponentArrays
@@ -62,7 +62,7 @@ end
 
 # Define the signal function
 f_signal(t) = sum(tanh(100(t - i))/2 - tanh(100(t - (i + pulse_duration))) / 2 for i in range(0, stop=100, step=(pulse_frequency + pulse_duration)))
-@Symbolics.register_symbolic f_signal(t)
+Symbolics.@register_symbolic f_signal(t)
 
 
 
