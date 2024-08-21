@@ -254,7 +254,7 @@ end
 # ╔═╡ 8371eec5-44e8-4627-8da3-bc809f51db2a
 function predict(θ, T=time)
     _prob = ModelingToolkit.remake(prob_nn, p = θ)
-    Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.Vern7(), saveat = T,
+    Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.AutoVern7(OrdinaryDiffEq.Rodas5P()), saveat = T,
         abstol = 1e-10, reltol = 1e-10,
 		sensealg=SciMLSensitivity.QuadratureAdjoint(autojacvec=SciMLSensitivity.ReverseDiffVJP(true))))
 end

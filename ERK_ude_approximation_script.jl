@@ -225,7 +225,7 @@ prob_nn = ModelingToolkit.ODEProblem(nn_dynamics!, u0, tspan, p)
 # Optimisation-specific functions
 function predict(θ, T=time)
     _prob = ModelingToolkit.remake(prob_nn, p = θ)
-    Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.Vern7(), saveat = T,
+    Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.AutoVern7(OrdinaryDiffEq.Rodas5P()), saveat = T,
                 abstol = 1e-10, reltol = 1e-10,
                 sensealg=SciMLSensitivity.QuadratureAdjoint(autojacvec=SciMLSensitivity.ReverseDiffVJP(true))))
 end
