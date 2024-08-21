@@ -26,14 +26,14 @@ if length(ARGS) < 4
         - Pulse frequency (Note: enter 100 for only one pulse)")
 else
     println("Running UDE approximation of EGF/NGF model for:")
-    CC = uppercasefirst(lowercase(ARGS[1]))
+    CC = lowercase(ARGS[1])
     GF = lowercase(ARGS[2])
     pulse_duration = parse(Int, ARGS[3])
     pulse_frequency = parse(Int, ARGS[4])
 
     # Name output file to save the results according to parameters used
     if pulse_frequency < 100
-        println("$(CC) concentration $(GF) with $(pulse_duration)' pulse every $(pulse_frequency)'")
+        println("$(uppercasefirst(CC)) concentration $(GF) with $(pulse_duration)' pulse every $(pulse_frequency)'")
         filename = string(GF, "_", CC, "CC_", pulse_duration, "m_", pulse_frequency, "v")
     else
         println("$(CC) concentration $(GF) with a single pulse of $(pulse_duration)'")
