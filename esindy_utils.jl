@@ -1,5 +1,5 @@
-# Module that contains GF model-specific functions
-module GFModule
+# Module that contains ERK model-specific functions
+module ERKModule
     
     # Standard libraries
     using CSV, DataFrames
@@ -41,7 +41,16 @@ module GFModule
 
 
     # Create E-SINDy compatible data structure out of dataframes
-    function create_data(df, labels = [], smoothing=0.)
+    function create_data(files, smoothing=0.)
+
+        # Load data into dataframe
+        df = CSV.read("./Data/$(files[1])", DataFrame)
+        if length(files) > 1
+            for i in 2:length(files)
+                df2 = CSV.read("./Data/$(files[i])", DataFrame)
+                df = vcat(df, df2)
+            end
+        end
     
     	# Retrieve the number of samples
     	n_samples = sum(df.time .== 0)
@@ -68,6 +77,9 @@ module GFModule
     	end
     
     	@assert size(X, 1) == size(Y, 1)
+
+    	# Create labels for plotting
+    	labels = make_labels(files)
     		
     	return (time=time, X=X, Y=smoothed_Y, GT=GT, labels=labels)
     end
@@ -99,6 +111,69 @@ module NFBModule
     export make_labels
     export create_data
     export build_basis
+
+
+    # Make sample labels for plotting
+    function make_labels(files)
+    	labels = []
+    	case = ""
+    	for file in files
+    		words = split(file, ".")
+    		words = split(words[1], "_")
+    		label = "Input CC 0."
+    		for word in words
+    			if occursin("a", word) || occursin("b", word) || occursin("no", word)
+    				case = word
+    			elseif isdigit(word[1]) 
+    				label = label * word[2:end]
+    			end
+    		end
+    		push!(labels, label)
+    	end
+    	return (labels=labels, case=case)
+    end
+
+    
+    # Create E-SINDy compatible data structure out of dataframes
+    function create_data(files)
+    
+    	# Load data into dataframe
+    	df = CSV.read("./Data/$(files[1])", DataFrame)
+    	if length(files) > 1
+    	    for i in 2:length(files)
+    	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
+    	        df = vcat(df, df2)
+    	    end
+    	end
+    
+    	# Create labels for plotting and retrieve NFB case
+    	labels, case = make_nfb_labels(files)
+    
+    	# Retrieve the number of samples
+    	n_samples = sum(df.time .== 0)
+    	size_sample = Int(nrow(df) / n_samples)
+    
+    	# Define relevant data for E-SINDy
+    	time = df.time
+    	X = [df.g1p_fit df.g2p_fit df.Xact_fit]
+    		Y = [df.NN1 df.NN2]
+    
+    	GT = 0
+    	if case == "a"
+    		GT = [df.Xact_fit repeat([0], size(df.Xact_fit, 1))]
+    	elseif case == "b"
+    		GT = [repeat([0], size(df.Xact_fit, 1)) df.Xact_fit]
+    	elseif case == "nofb"
+    		GT = [repeat([0], size(df.time, 1)) repeat([0], size(df.time, 1))]
+    	elseif case == "ab"
+    		GT = [df.Xact_fit df.Xact_fit]
+    	end
+    
+    	@assert size(X, 1) == size(Y, 1)
+    		
+    	return (time=time, X=X, Y=Y, GT=GT, labels=labels, case=case)
+    end
+
 
     # Function to build a basis
     function build_basis(x)
@@ -217,7 +292,46 @@ module ESINDyModule
     	end
     	return bootstrap_coef 
     end
+
+
+    # Bootstrapping function that estimate optimal library terms given data
+    function library_bootstrap(data, basis, n_bstraps, n_libterms)
     
+    	# Initialise the coefficient array
+    	n_eqs = size(data.Y, 2)
+    	l_basis = length(basis)
+    	bootstrap_coef = zeros(n_bstraps, n_eqs, l_basis)
+    
+    	@info "Library E-SINDy Bootstrapping:"
+    	@progress name="Bootstrapping" threshold=0.01 for j in 1:n_bstraps
+    					
+    		# Define data driven problem with bootstrapped data
+    		rand_ind = sample(1:l_basis, n_libterms, replace=false)
+    		
+    		# Check if the problem involves implicits
+    		implicits = implicit_variables(basis)
+    		with_implicits = false
+    		if !isempty(implicits)
+    			with_implicits = true
+    			bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], x[1:size(data.X, 2)], implicits=i[1:1])
+    		else
+    			bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], x[1:size(data.X, 2)])
+    		end
+    
+    		# Solve problem with optimal hyperparameters
+    		dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(data.X', data.Y')
+    		best_λ, best_ν = get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
+    		if with_implicits
+    			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
+    		else
+    			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options) 			
+    
+    		end
+    		bootstrap_coef[j,:,rand_ind] = best_res.out[1].coefficients
+    		
+    	end
+    	return bootstrap_coef 
+    end
     
     
     # Function to estimate coefficient statistics (mean, std)
