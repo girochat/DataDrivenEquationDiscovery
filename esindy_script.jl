@@ -2,7 +2,7 @@
 import ModelingToolkit, Symbolics
 
 # Standard libraries
-using Statistics, Plots, CSV, DataFrames, Printf
+using Statistics, Plots, CSV, DataFrames
 
 # External libraries
 using HyperTuning, StableRNGs, Distributions, SmoothingSplines, Logging, ColorSchemes, JLD2, ProgressLogging
@@ -28,7 +28,7 @@ using .ESINDyModule
 # Retrieve file arguments
 if length(ARGS) < 4
     error("Error! You need to specify as arguments:
-        - Type of model (NFB/GF model)
+        - Type of model (NFB/ERK model)
         - Number of bootstraps
         - Coefficient threshold
         - Confidence interval
@@ -48,28 +48,16 @@ else
     filename = "ngf_esindy_100bt"
 end
 
-if model == "gf"
-    using .GFModule
+if model == "erk"
+    using .ERKModule
 else
     using .NFBModule
 end
 
 
 
-
-
 ##### Import the data #####
-df = CSV.read(files[1], DataFrame)
-if length(files) > 1
-    for i in 2:length(files)
-        df2 = CSV.read(files[i], DataFrame)
-        global df = vcat(df, df2)
-    end
-end
-
-labels = make_labels(files)
-data = create_data(df, labels, 300.)
-
+data = create_data(files, 300.)
 
 
 
