@@ -8,7 +8,6 @@ using InteractiveUtils
 begin 
 	import Pkg
 	Pkg.activate(".")
-	#Pkg.Registry.status()
 end
 
 # ╔═╡ a806fdd2-5017-11ef-2351-dfc89f69b334
@@ -20,7 +19,7 @@ begin
 	using StatsBase, Plots, CSV, DataFrames, Printf
 
 	# External libraries
-	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ProgressLogging, ColorSchemes, JLD2, StatsBase
+	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ProgressLogging, ColorSchemes, JLD2
 
 	# Add Revise.jl before the Dev packages to track
 	#using Revise
@@ -36,8 +35,15 @@ end
 
 # ╔═╡ 9ebfadf0-b711-46c0-b5a2-9729f9e042ee
 md"""
-### Equation discovery with E-SINDy
-This notebook is about estimating the equation describing the unknown dynamics approximated by the neural network. It uses the Ensemble SINDy approach described in "Discovering governing equations from data by sparse identification of nonlinear dynamical systems" by Brunton et al. (2016).
+# Equation discovery with E-SINDy
+This notebook contains the code to implement the E-SINDy algorithms as presented in "Discovering governing equations from data by sparse identification of nonlinear dynamical systems" by Brunton et al. (2016), [DOI](https://doi.org/10.1098/rspa.2021.0904). It was designed to estimate the algebraic formula of an unknown function approximated by a neural network in the context of an ODE system. Two different signalling pathways, and corresponding ODE systems, were considered that generated the data used in this notebook:
+- Simple Negative Feedback Loop model (NFB) of two phosphatases g1p and g2p (Chapter 12: Parameter Estimation, Sloppiness, and Model Identifiability in "Quantitative Biology: Theory, Computational Methods and Examples of Models" by D. Daniels, M. Dobrzyński, D. Fey (2018)).
+- ERK activation dynamics model (ERK) as described in "Frequency modulation of ERK activation dynamics rewires cell fate" by H. Ryu et al. (2015).
+"""
+
+# ╔═╡ 6024651c-85f6-4e53-be0f-44f658cf9c77
+md"""
+##### Environment Set-up 
 """
 
 # ╔═╡ 6b5db2ee-bb76-4617-b6b1-e7b6064b0fb9
@@ -57,36 +63,40 @@ md"""
 ###### - NFB model
 """
 
-# ╔═╡ af06c850-2e8b-4b4b-9d0f-02e645a79743
-begin
-	# Load the NFB model estimations for various concentrations
-	df_nofb_01 = CSV.read("./Data/NFB_nofb_01.csv", DataFrame)
-	df_nofb_005 = CSV.read("./Data/NFB_nofb_005.csv", DataFrame)
-	df_nofb_001 = CSV.read("./Data/NFB_nofb_001.csv", DataFrame)
-	df_nofb_0001 = CSV.read("./Data/NFB_nofb_0001.csv", DataFrame)
-	df_nofb = vcat(df_nofb_01, df_nofb_005, df_nofb_001, df_nofb_0001)
-	
-	df_a_01 = CSV.read("./Data/NFB_a_01.csv", DataFrame)
-	df_a_005 = CSV.read("./Data/NFB_a_005.csv", DataFrame)
-	df_a_001 = CSV.read("./Data/NFB_a_001.csv", DataFrame)
-	df_a_0001 = CSV.read("./Data/NFB_a_0001.csv", DataFrame)
-	df_a = vcat(df_a_01, df_a_005, df_a_001, df_a_0001)
-	
-	df_b_01 = CSV.read("./Data/NFB_b_01.csv", DataFrame)
-	df_b_005 = CSV.read("./Data/NFB_b_005.csv", DataFrame)
-	df_b_001 = CSV.read("./Data/NFB_b_001.csv", DataFrame)
-	df_b_0001 = CSV.read("./Data/NFB_b_0001.csv", DataFrame)
-	df_b = vcat(df_b_01, df_b_001, df_b_005, df_b_0001)
-	
-	df_ab_01 = CSV.read("./Data/NFB_ab_01.csv", DataFrame)
-	df_ab_005 = CSV.read("./Data/NFB_ab_005.csv", DataFrame)
-	df_ab_001 = CSV.read("./Data/NFB_ab_001.csv", DataFrame)
-	df_ab_0001 = CSV.read("./Data/NFB_ab_0001.csv", DataFrame)
-	df_ab = vcat( df_ab_001,  df_ab_0001, df_ab_005,df_ab_01)
+# ╔═╡ fd914104-90da-469c-a80f-f068cac51a1c
+# Make sample labels for plotting
+function make_nfb_labels(files)
+	labels = []
+	case = ""
+	for file in files
+		words = split(file, ".")
+		words = split(words[1], "_")
+		label = "Input CC 0."
+		for word in words
+			if occursin("a", word) || occursin("b", word) || occursin("no", word)
+				case = word
+			elseif isdigit(word[1]) 
+				label = label * word[2:end]
+			end
+		end
+		push!(labels, label)
+	end
+	return (labels=labels, case=case)
 end
 
 # ╔═╡ f21876f0-3124-40ad-ad53-3a53efe77040
-function create_nfb_data(df, labels = [], smoothing=0.)
+# Create E-SINDy compatible data structure out of dataframes
+function create_nfb_data(files, smoothing=0.)
+
+	df = CSV.read("./Data/$(files[1])", DataFrame)
+	if length(files) > 1
+	    for i in 2:length(files)
+	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
+	        df = vcat(df, df2)
+	    end
+	end
+
+	labels, case = make_nfb_labels(files)
 
 	# Retrieve the number of samples
 	n_samples = sum(df.time .== 0)
@@ -94,41 +104,81 @@ function create_nfb_data(df, labels = [], smoothing=0.)
 
 	time = df.time
 	X = [df.g1p_fit df.g2p_fit df.Xact_fit]
-	GT = (0.75 .* df.PFB_fit .* 
-		(1 .- df.Raf_fit) ./ (0.01 .+ (1 .- df.Raf_fit)))
-	Y = df.NN_approx
+		Y = [df.NN1 df.NN2]
 
-	if smoothing != 0
-		smoothed_Y = zeros(size(Y))
-		for i in 0:(n_samples-1)
-			x_t = df.time[1 + i*size_sample: (i+1)*size_sample]
-			y = df.NN_approx[1 + i*size_sample: (i+1)*size_sample]
-			λ = smoothing  # smoothing parameter
-			spl = fit(SmoothingSpline, x_t, y, λ)
-			smoothed_y = predict(spl)
-			smoothed_Y[1 + i*size_sample: (i+1)*size_sample] = smoothed_y
-		end
+	GT = 0
+	if case == "a"
+		GT = [df.Xact_fit repeat([0], size(df.Xact_fit, 1))]
+	elseif case == "b"
+		GT = [repeat([0], size(df.Xact_fit, 1)) df.Xact_fit]
+	elseif case == "nofb"
+		GT = [repeat([0], size(df.time, 1)) repeat([0], size(df.time, 1))]
+	elseif case == "ab"
+		GT = [df.Xact_fit df.Xact_fit]
 	end
 
 	@assert size(X, 1) == size(Y, 1)
 		
-	return (time=time, X=X, Y=smoothed_Y, GT=GT, labels=labels)
+	return (time=time, X=X, Y=Y, GT=GT, labels=labels, case=case)
 end
 
-# ╔═╡ b2fa5d37-a681-4d81-bdf4-38238a6c5d85
-# ╠═╡ disabled = true
-#=╠═╡
-nfb_data = create_nfb_data(df_a, )
-  ╠═╡ =#
+# ╔═╡ af06c850-2e8b-4b4b-9d0f-02e645a79743
+begin
+	# Load the NFB model estimations for various concentrations
+	nofb_files = ["NFB_nofb_01.csv" "NFB_nofb_005.csv" "NFB_nofb_001.csv" "NFB_nofb_0001.csv"]
+	nofb_data = create_nfb_data(nofb_files)
+
+	a_files = ["NFB_a_01.csv" "NFB_a_005.csv" "NFB_a_001.csv" "NFB_a_0001.csv"]
+	a_data = create_nfb_data(a_files)
+
+	b_files = ["NFB_b_01.csv" "NFB_b_005.csv" "NFB_b_001.csv" "NFB_b_0001.csv"]
+	b_data = create_nfb_data(b_files)
+
+	ab_files = ["NFB_ab_01.csv" "NFB_ab_005.csv" "NFB_ab_001.csv" "NFB_ab_0001.csv"]
+	ab_data = create_nfb_data(ab_files)
+end
 
 # ╔═╡ b549bff5-d8e9-4f41-96d6-2d562584ccd9
 md"""
-###### -EGF/NGF model
+###### -ERK model
 """
+
+# ╔═╡ 447a8dec-ae5c-4ffa-b672-4f829c23eb1f
+# Make sample labels for plotting
+function make_erk_labels(files)
+	labels = []
+	for file in files
+		words = split(file, ".")
+		words = split(words[1], "_")
+		label = ""
+		for word in words
+			if occursin("CC", word)
+				label = label * uppercasefirst(word) * " "
+			elseif occursin("m", word)
+				label = label * filter(isdigit, word) * "'"
+			elseif occursin("v", word)
+				label = label * "/" * filter(isdigit, word) * "'"
+			elseif occursin("pulse", word)
+				label = label * " (" * filter(isdigit, word) * "x)"
+			end
+		end
+		push!(labels, label)
+	end
+	return labels
+end
 
 # ╔═╡ 6c7929f5-15b2-4e19-8c26-e709f0da182e
 # Create E-SINDy compatible data structure out of dataframes
-function create_gf_data(df, labels = [], smoothing=0.)
+function create_erk_data(files, smoothing=0.)
+
+	# Load data into dataframe
+	df = CSV.read("./Data/$(files[1])", DataFrame)
+	if length(files) > 1
+	    for i in 2:length(files)
+	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
+	        df = vcat(df, df2)
+	    end
+	end
 
 	# Retrieve the number of samples
 	n_samples = sum(df.time .== 0)
@@ -155,53 +205,23 @@ function create_gf_data(df, labels = [], smoothing=0.)
 	end
 
 	@assert size(X, 1) == size(Y, 1)
-		
-	return (time=time, X=X, Y=smoothed_Y, GT=GT, labels=labels)
-end
 
-# ╔═╡ 447a8dec-ae5c-4ffa-b672-4f829c23eb1f
-# Make sample labels for plotting
-function make_gf_labels(files)
-	labels = []
-	for file in files
-		words = split(file, ".")
-		words = split(words[1], "_")
-		label = ""
-		for word in words
-			if occursin("CC", word)
-				label = label * uppercasefirst(word) * " "
-			elseif occursin("m", word)
-				label = label * filter(isdigit, word) * "'"
-			elseif occursin("v", word)
-				label = label * "/" * filter(isdigit, word) * "'"
-			elseif occursin("pulse", word)
-				label = label * " (" * filter(isdigit, word) * "x)"
-			end
-		end
-		push!(labels, label)
-	end
-	return labels
+	# Create labels for plotting out of the filenames
+	labels = make_erk_labels(files)
+	
+	return (time=time, X=X, Y=smoothed_Y, GT=GT, labels=labels)
 end
 
 # ╔═╡ f598564e-990b-436e-aa97-b2239b44f6d8
 begin
 	# Load the NGF model estimations for various pulse regimes
-	files = ["ngf_highCC_10m_10v.csv" "ngf_highCC_10m_3pulse.csv" "ngf_highCC_3m_20v.csv" "ngf_highCC_10m.csv" "ngf_highCC_3m_3v.csv" "ngf_lowCC_10m_10v.csv"]
-	
-	ngf_df = CSV.read("./Data/$(files[1])", DataFrame)
-	if length(files) > 1
-	    for i in 2:length(files)
-	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
-	        ngf_df = vcat(ngf_df, df2)
-	    end
-	end
-	ngf_labels = make_gf_labels(files)
-	ngf_data = create_gf_data(ngf_df, ngf_labels, 300.)
+	ngf_files = ["ngf_highCC_10m_10v.csv" "ngf_highCC_10m_3pulse.csv" "ngf_highCC_3m_20v.csv" "ngf_highCC_10m.csv" "ngf_highCC_3m_3v.csv" "ngf_lowCC_10m_10v.csv"]
+	ngf_data = create_erk_data(ngf_files, 300.)
 end
 
 # ╔═╡ 74ad0ae0-4406-4326-822a-8f3e027077b3
 md"""
-##### Set up the SINDy library of functions and hyperparameters optimisation
+##### Set up the SINDy library of functions
 """
 
 # ╔═╡ 9dc0a251-a637-4144-b32a-7ebf5b86b6f3
@@ -226,6 +246,11 @@ begin
 	gf_h = DataDrivenDiffEq.polynomial_basis(x[1:5], 2)
 	gf_basis = DataDrivenDiffEq.Basis([gf_h; gf_h .* i], x[1:5], implicits=i[1:1])
 end
+
+# ╔═╡ 219b794d-9f51-441b-9197-b8ef0c4495b4
+md"""
+##### Set up the hyperparameter optimisation
+"""
 
 # ╔═╡ 4646bfce-f8cc-4d24-b461-753daff50f71
 begin
@@ -276,7 +301,7 @@ md"""
 
 # ╔═╡ c7e825a3-8ce6-48fc-86ac-21810d32bbfb
 # Bootstrapping function that estimate optimal library coefficients given data
-function sindy_bootstrap(data, basis, n_bstraps)
+function sindy_bootstrap(data, basis, n_bstraps, n_libterms)
 
 	# Initialise the coefficient array
 	n_eqs = size(data.Y, 2)
@@ -558,13 +583,12 @@ md"""
 # ╔═╡ 53bc1c92-cf25-4de0-99f2-9bdaa754ea18
 # ╠═╡ disabled = true
 #=╠═╡
-JLD2.@save "./Data/ngf_esindy_1000bt.jld2" ngf_results
+#JLD2.@save "./Data/ngf_esindy_1000bt.jld2" ngf_results
+JLD2.@load "./Data/ngf_esindy_1000bt.jld2" ngf_results
   ╠═╡ =#
 
 # ╔═╡ 68ef2a1c-69ae-42fd-ae7a-c99fdf05888a
-#=╠═╡
-e_coef, sem_coef = compute_coef_stat(lib_res, 0)
-  ╠═╡ =#
+e_coef, sem_coef = compute_coef_stat(lib_res, 20)
 
 # ╔═╡ 546a2d07-3793-4428-8379-7e60eec2b9dd
 #=╠═╡
@@ -681,22 +705,24 @@ esindy_res_ab.coef_mean
 
 # ╔═╡ Cell order:
 # ╟─9ebfadf0-b711-46c0-b5a2-9729f9e042ee
-# ╠═b9ff1932-20ef-48da-9d2d-d61f3ee13a4f
+# ╟─6024651c-85f6-4e53-be0f-44f658cf9c77
+# ╟─b9ff1932-20ef-48da-9d2d-d61f3ee13a4f
 # ╟─6b5db2ee-bb76-4617-b6b1-e7b6064b0fb9
-# ╠═a806fdd2-5017-11ef-2351-dfc89f69b334
+# ╟─a806fdd2-5017-11ef-2351-dfc89f69b334
 # ╟─d6b1570f-b98b-4a98-b5e5-9d747930a5ab
 # ╟─666a20eb-8395-4859-ae70-aa8ea22c5c77
+# ╟─f21876f0-3124-40ad-ad53-3a53efe77040
+# ╟─fd914104-90da-469c-a80f-f068cac51a1c
 # ╟─af06c850-2e8b-4b4b-9d0f-02e645a79743
-# ╠═f21876f0-3124-40ad-ad53-3a53efe77040
-# ╠═b2fa5d37-a681-4d81-bdf4-38238a6c5d85
 # ╟─b549bff5-d8e9-4f41-96d6-2d562584ccd9
 # ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
 # ╟─447a8dec-ae5c-4ffa-b672-4f829c23eb1f
-# ╠═f598564e-990b-436e-aa97-b2239b44f6d8
+# ╟─f598564e-990b-436e-aa97-b2239b44f6d8
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
 # ╟─ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
-# ╠═e81310b5-63e1-45b8-ba4f-81751d0fcc06
+# ╟─e81310b5-63e1-45b8-ba4f-81751d0fcc06
+# ╟─219b794d-9f51-441b-9197-b8ef0c4495b4
 # ╟─4646bfce-f8cc-4d24-b461-753daff50f71
 # ╟─034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╟─0f7076ef-848b-4b3c-b918-efb6419787be
