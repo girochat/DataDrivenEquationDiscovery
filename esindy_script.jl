@@ -31,21 +31,18 @@ if length(ARGS) < 4
         - Type of model (NFB/ERK model)
         - Number of bootstraps
         - Coefficient threshold
-        - Confidence interval
+        - Output filename
         - List of files")
 else
     model = uppercase(ARGS[1])
     n_bstraps = parse(Int, ARGS[2])
     coef_threshold = parse(Int, ARGS[3])
     CI_confidence = parse(Int, ARGS[4])
-    files = ARGS[5:end]
+    filename = ARGS[5]
+    files = ARGS[6:end]
 
     println("Running E-SINDy for $(model) model with $(n_bstraps) bootstraps. 
-        Coefficient threshold set to $(coef_threshold).
-        Plotting with $(CI_confidence) confidence interval.")
-
-    # Name output file to save the results according to parameters used
-    filename = "ngf_esindy_100bt"
+        Coefficient threshold set to $(coef_threshold).")
 end
 
 if model == "erk"
@@ -60,7 +57,6 @@ end
 data = create_data(files, 300.)
 
 
-
 ##### Set up the SINDy library #####
 
 # Declare necessary symbolic variables for the bases
@@ -71,10 +67,15 @@ i = collect(i)
 basis = build_basis(x[1:size(data.X, 2)], i)
 
 
+##### Run Library E-SINDy #####
+lib_coefficients = library_bootstrap(data, basis, 5000, 10)
+
 ##### Run E-SINDy (b(r)agging) #####
-results = e_sindy(data, basis, n_bstraps, coef_threshold, CI_confidence) 
+#results = e_sindy(data, basis, n_bstraps, coef_threshold, CI_confidence) 
+
+#results = (library_esindy = lib_coefficients, esindy_results = results)
 
 # save results
-JLD2.@save "./Data/$(filename).jld2" results
+JLD2.@save "./Data/$(filename).jld2" lib_coefficients
 
 

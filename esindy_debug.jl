@@ -16,10 +16,10 @@ begin
 	import ModelingToolkit, Symbolics
 	
 	# Standard libraries
-	using StatsBase, Plots, CSV, DataFrames, Printf
+	using StatsBase, Plots, CSV, DataFrames, Printf, Statistics
 
 	# External libraries
-	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ProgressLogging, ColorSchemes, JLD2
+	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ProgressLogging, ColorSchemes, JLD2, Combinatorics
 
 	# Add Revise.jl before the Dev packages to track
 	#using Revise
@@ -88,6 +88,7 @@ end
 # Create E-SINDy compatible data structure out of dataframes
 function create_nfb_data(files, smoothing=0.)
 
+	# Load data into dataframe
 	df = CSV.read("./Data/$(files[1])", DataFrame)
 	if length(files) > 1
 	    for i in 2:length(files)
@@ -96,12 +97,14 @@ function create_nfb_data(files, smoothing=0.)
 	    end
 	end
 
+	# Create labels for plotting and retrieve NFB case
 	labels, case = make_nfb_labels(files)
 
 	# Retrieve the number of samples
 	n_samples = sum(df.time .== 0)
 	size_sample = Int(nrow(df) / n_samples)
 
+	# Define relevant data for E-SINDy
 	time = df.time
 	X = [df.g1p_fit df.g2p_fit df.Xact_fit]
 		Y = [df.NN1 df.NN2]
@@ -186,7 +189,7 @@ function create_erk_data(files, smoothing=0.)
 
 	# Define relevant data for E-SINDy
 	time = df.time
-	X = [df.R_fit df.Ras_fit df.Raf_fit df.MEK_fit df.PFB_fit] # [df.Raf_fit df.PFB_fit] #
+	X = [df.R_fit df.Ras_fit df.Raf_fit df.MEK_fit df.PFB_fit] #[df.Raf_fit df.PFB_fit] # 
 	GT = (0.75 .* df.PFB_fit .* 
 		(1 .- df.Raf_fit) ./ (0.01 .+ (1 .- df.Raf_fit)))
 	Y = df.NN_approx
@@ -206,7 +209,7 @@ function create_erk_data(files, smoothing=0.)
 
 	@assert size(X, 1) == size(Y, 1)
 
-	# Create labels for plotting out of the filenames
+	# Create labels for plotting
 	labels = make_erk_labels(files)
 	
 	return (time=time, X=X, Y=smoothed_Y, GT=GT, labels=labels)
@@ -243,8 +246,8 @@ end
 # ╔═╡ e81310b5-63e1-45b8-ba4f-81751d0fcc06
 begin
 	# Define a basis of functions to estimate the unknown equation of GFs model
-	gf_h = DataDrivenDiffEq.polynomial_basis(x[1:5], 2)
-	gf_basis = DataDrivenDiffEq.Basis([gf_h; gf_h .* i], x[1:5], implicits=i[1:1])
+	erk_h = DataDrivenDiffEq.polynomial_basis(x[1:5], 2)
+	erk_basis = DataDrivenDiffEq.Basis([erk_h; erk_h .* i], x[1:5], implicits=i[1:1])
 end
 
 # ╔═╡ 219b794d-9f51-441b-9197-b8ef0c4495b4
@@ -301,7 +304,7 @@ md"""
 
 # ╔═╡ c7e825a3-8ce6-48fc-86ac-21810d32bbfb
 # Bootstrapping function that estimate optimal library coefficients given data
-function sindy_bootstrap(data, basis, n_bstraps, n_libterms)
+function sindy_bootstrap(data, basis, n_bstraps)
 
 	# Initialise the coefficient array
 	n_eqs = size(data.Y, 2)
@@ -336,6 +339,8 @@ function sindy_bootstrap(data, basis, n_bstraps, n_libterms)
 			best_res = DataDrivenDiffEq.solve(dd_prob, basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options) 			
 
 		end
+		
+		# Store library coefficient for current bootstrap
 		bootstrap_coef[i,:,:] = best_res.out[1].coefficients
 		
 	end
@@ -445,15 +450,22 @@ function build_equations(coef, basis, verbose=true)
 	return y
 end
 
+# ╔═╡ d7e68526-5ba9-41ed-9669-e7a289db1e93
+
+
 # ╔═╡ 30ae9b9d-1f10-4cc8-b605-096badd27f4a
+# ╠═╡ disabled = true
 #=╠═╡
-function compute_CI(data, mean_coef, sem_coef)
+# Compute the confidence interval by estimating the upper and lower boundary function
+function compute_CI(data, mean_coef, sem_coef, basis)
 	lower_b = repeat([Inf], size(data.time, 1))
 	upper_b = repeat([-Inf], size(data.time, 1))
-	
+
+	# Find indices where the SEM coefficients are non-zero
 	non_zero_idx = findall(!iszero, sem_coef)
 	n_coef = length(non_zero_idx)
-	
+
+	# For the number of non-zero coef. do all possible combinations of +, - operations
 	operations = []
 	combs = collect(with_replacement_combinations([+, -], n_coef))
 	for comb in combs
@@ -462,15 +474,15 @@ function compute_CI(data, mean_coef, sem_coef)
 	end
 	operations = unique!(operations)
 	
-	ci_coef = zeros(size(e_coef))
+	# Estimate the upper and lower boundary function given a combination of SEM coef.
+	ci_coef = zeros(size(mean_coef))
 	for operation in operations
 		for i in 1:n_coef
 			i_coef = non_zero_idx[i]
-			ci_coef[i_coef] = operation[i](e_coef[i_coef], sem_coef[i_coef])
+			ci_coef[i_coef] = operation[i](mean_coef[i_coef], sem_coef[i_coef])
 		end
-		ci_y = build_equations(ci_coef, gf_basis, false)
-		ci_y_vals = [ci_y[1](x) for x in eachrow(ngf_data.X[1:801,:])]
-		println(size(min.(lower_b, ci_y_vals)))
+		ci_y = build_equations(ci_coef, basis, false)
+		ci_y_vals = [ci_y[1](x) for x in eachrow(ngf_data.X)]
 		lower_b = min.(lower_b, ci_y_vals)
 		upper_b = max.(upper_b, ci_y_vals)
 	end
@@ -480,26 +492,13 @@ end
 
 # ╔═╡ cc2395cc-00df-4e5e-8573-e85ce813fd41
 # Plotting function for E-SINDy results
-function plot_esindy(data, y, ci_coef, basis, confidence)
-	
-	# Get the quantile corresponding to the confidence interval
-	Z = Normal()
-	if 0 <= confidence <= 1
-		q = quantile(Z, confidence)
-	else
-		q = quantile(Z, confidence/100)
-	end
+function plot_esindy(data, y, basis)
 
-	# Obtain the equations for the SEM (standard error of the mean)
-	if sum(ci_coef) != 0
-		ci_y = build_equations(ci_coef, basis, false)
-	end
-		
 	# Retrieve the number of samples
 	n_samples = sum(data.time .== 0)
 	size_sample = Int(length(ngf_data.time) / n_samples)
 
-	# Plot results with CI
+	# Plot results
 	n_eqs = size(y, 1)
 	subplots = []
 	palette = colorschemes[:seaborn_colorblind] # [:vik10]
@@ -521,16 +520,11 @@ function plot_esindy(data, y, ci_coef, basis, confidence)
 			if length(y_vals) == 1
 				y_vals = repeat([y_vals], size_sample)
 			end
-			
-			ci_vals = [ci_y[1](x) for x in eachrow([ngf_data.X[i_start:i_end,:] ngf_data.Y[i_start:i_end]])] 
 
-			if length(ci_vals) == 1
-				ci_vals = repeat([ci_vals], size_sample)
-			end
-
-			plot!(p, ngf_data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color], ribbon=q .* (ci_vals-y_vals), fillalpha=0.15)
+			plot!(p, ngf_data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color])
 
 			plot!(p, ngf_data.time[i_start:i_end], ngf_data.GT[i_start:i_end], label="", linestyle=:dash, color=palette[i_color])
+
 		end
 		plot!(p, [], [],  label="GT", color=:black, linestyle=:dash)
 		push!(subplots, p)
@@ -540,7 +534,7 @@ end
 
 # ╔═╡ 012a5186-03aa-482d-bb62-ecba49587877
 # Complete E-SINDy function 
-function e_sindy(data, basis, n_bstrap, coef_threshold=15, confidence=95)
+function esindy(data, basis, n_bstrap, coef_threshold=15)
 
 	# Run sindy bootstraps
 	bootstrap_res = sindy_bootstrap(data, basis, n_bstrap)
@@ -553,26 +547,62 @@ function e_sindy(data, basis, n_bstrap, coef_threshold=15, confidence=95)
 	y = build_equations(e_coef, basis)
 
 	# Plot result
-	plots = plot_esindy(data, y, coef_sem, basis, confidence)
+	plots = plot_esindy(data, y, basis)
 	
 	return (equations=y, bootstraps=bootstrap_res, coef_mean=e_coef, coef_sem=coef_sem, plots=plots)
 end
 
 # ╔═╡ 569c7600-246b-4a64-bba5-1e74a5888d8c
 md"""
-### GFs model
+### ERK model
 """
 
-# ╔═╡ b790d677-690c-487e-b40f-24a295096a38
-# ╠═╡ disabled = true
-#=╠═╡
-lib_res = library_bootstrap(ngf_data, gf_basis, 100, 10)
-  ╠═╡ =#
+# ╔═╡ 1f3f1461-09f1-4825-bb99-4064e075e23e
+md"""
+##### Run E-SINDy
+"""
+
+# ╔═╡ ea3d58a1-e37f-4f61-b003-e1c19a60bf7f
+lib_coef = library_bootstrap(ngf_data, erk_basis, 100, 10)
 
 # ╔═╡ b73f3450-acfd-4b9e-9b7f-0f7289a62976
 # ╠═╡ disabled = true
 #=╠═╡
-ngf_results_full = sindy_bootstrap(ngf_data, gf_basis, 50) #e_sindy(ngf_data, gf_basis, 10, 15, 95) 
+ngf_res = esindy(ngf_data, erk_basis, 20, 15) 
+  ╠═╡ =#
+
+# ╔═╡ 25e99792-0f37-4bd5-98e3-5eed1302f915
+#=╠═╡
+lower_b, upper_b = compute_CI(ngf_data, ngf_res.coef_mean, ngf_res.coef_sem, erk_basis)
+  ╠═╡ =#
+
+# ╔═╡ de4c57fe-1a29-4354-a5fe-f4e184de4dd3
+#=╠═╡
+begin
+	y_vals = [ngf_res.equations[1](x) for x in eachrow([ngf_data.X[1:801,:] ngf_data.Y[1:801]])]
+	plot(y_vals, ribbon=(y_vals - lower_b[1:801], upper_b[1:801] - y_vals))
+	#plot!(y_vals)
+	#
+	#plot(y_vals, ribbon=200 * (-ci_vals-y_vals))
+end
+  ╠═╡ =#
+
+# ╔═╡ 445c83aa-7b15-4c19-bdea-a1b9bb3c5e45
+#=╠═╡
+begin
+	plot(lower_b[1:801])
+	plot!([ngf_res.equations[1](x) for x in eachrow(ngf_data.X[1:801,:])])
+end
+  ╠═╡ =#
+
+# ╔═╡ 722d4036-f405-4815-a99e-87bdc6981923
+#=╠═╡
+plot(ngf_res.plots[1])
+  ╠═╡ =#
+
+# ╔═╡ 770e5ae1-2baf-4edb-bed5-470d7664aad1
+#=╠═╡
+plot(ngf_res.plots[1])
   ╠═╡ =#
 
 # ╔═╡ 02c625dc-9d21-488e-983b-c3e2c40e0aad
@@ -580,34 +610,35 @@ md"""
 ##### Save the results (JLD2 file)
 """
 
-# ╔═╡ 53bc1c92-cf25-4de0-99f2-9bdaa754ea18
-# ╠═╡ disabled = true
-#=╠═╡
+# ╔═╡ 04538fbf-63b7-4394-b281-f047d0c3ea51
 #JLD2.@save "./Data/ngf_esindy_1000bt.jld2" ngf_results
-JLD2.@load "./Data/ngf_esindy_1000bt.jld2" ngf_results
-  ╠═╡ =#
+#JLD2.@save "./Data/ngf_esindy_100bt.jld2" ngf_results
 
-# ╔═╡ 68ef2a1c-69ae-42fd-ae7a-c99fdf05888a
-e_coef, sem_coef = compute_coef_stat(lib_res, 20)
+# ╔═╡ cef23151-ada1-40e6-9d3f-2c67114a1546
+md"""
+##### Load the results (JLD2 file)
+"""
 
-# ╔═╡ 546a2d07-3793-4428-8379-7e60eec2b9dd
-#=╠═╡
-y = build_equations(e_coef, gf_basis)
-  ╠═╡ =#
+# ╔═╡ 9224f09a-50fd-4889-b6d0-bb2b100af191
+begin
+	# To see which key(s) were used to store the object in the jld2 file
+	file = jldopen("./Data/ngf_esindy_100bt.jld2", "r")
+	println(keys(file))
+	close(file)
+end
 
-# ╔═╡ 92253578-43c5-499e-95b1-1bd770592403
-#=╠═╡
-p = plot_esindy(ngf_data, y, e_coef .+ sem_coef, gf_basis, 95)
-  ╠═╡ =#
-
-# ╔═╡ a3e48b28-2826-4254-bd26-a10a67688b68
-#=╠═╡
-plot(p[1])
-  ╠═╡ =#
+# ╔═╡ 53bc1c92-cf25-4de0-99f2-9bdaa754ea18
+begin
+	JLD2.@load "./Data/ngf_esindy_1000bt.jld2" ngf_results
+	e_coef, sem_coef = compute_coef_stat(ngf_results, 20)
+	y = build_equations(e_coef, erk_basis)
+	p = plot_esindy(ngf_data, y, erk_basis, 95)
+	plot(p[1], title="E-SINDy results for ERK model\nafter NGF stimulation\n")
+end
 
 # ╔═╡ d0e65b25-0ea7-46c1-ac15-99eea43b6ade
 md"""
-### NFB models
+### NFB model
 """
 
 # ╔═╡ 77c1d355-8a7e-414e-9e0e-8eda1fbbbf1d
@@ -727,22 +758,28 @@ esindy_res_ab.coef_mean
 # ╟─034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╟─0f7076ef-848b-4b3c-b918-efb6419787be
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
-# ╠═c7e825a3-8ce6-48fc-86ac-21810d32bbfb
-# ╠═79b03041-01e6-4d8e-b900-446511c81058
+# ╟─c7e825a3-8ce6-48fc-86ac-21810d32bbfb
+# ╟─79b03041-01e6-4d8e-b900-446511c81058
 # ╟─74b2ade4-884b-479d-9fee-828d37d7ab47
 # ╟─97ae69f0-764a-4aff-88cd-91accf6bb3fd
+# ╟─d7e68526-5ba9-41ed-9669-e7a289db1e93
 # ╟─30ae9b9d-1f10-4cc8-b605-096badd27f4a
-# ╟─cc2395cc-00df-4e5e-8573-e85ce813fd41
-# ╟─012a5186-03aa-482d-bb62-ecba49587877
+# ╠═cc2395cc-00df-4e5e-8573-e85ce813fd41
+# ╠═012a5186-03aa-482d-bb62-ecba49587877
 # ╟─569c7600-246b-4a64-bba5-1e74a5888d8c
-# ╠═b790d677-690c-487e-b40f-24a295096a38
+# ╟─1f3f1461-09f1-4825-bb99-4064e075e23e
+# ╠═ea3d58a1-e37f-4f61-b003-e1c19a60bf7f
 # ╠═b73f3450-acfd-4b9e-9b7f-0f7289a62976
+# ╠═25e99792-0f37-4bd5-98e3-5eed1302f915
+# ╠═de4c57fe-1a29-4354-a5fe-f4e184de4dd3
+# ╠═445c83aa-7b15-4c19-bdea-a1b9bb3c5e45
+# ╠═722d4036-f405-4815-a99e-87bdc6981923
+# ╠═770e5ae1-2baf-4edb-bed5-470d7664aad1
 # ╟─02c625dc-9d21-488e-983b-c3e2c40e0aad
+# ╠═04538fbf-63b7-4394-b281-f047d0c3ea51
+# ╟─cef23151-ada1-40e6-9d3f-2c67114a1546
+# ╠═9224f09a-50fd-4889-b6d0-bb2b100af191
 # ╠═53bc1c92-cf25-4de0-99f2-9bdaa754ea18
-# ╠═68ef2a1c-69ae-42fd-ae7a-c99fdf05888a
-# ╠═546a2d07-3793-4428-8379-7e60eec2b9dd
-# ╠═92253578-43c5-499e-95b1-1bd770592403
-# ╠═a3e48b28-2826-4254-bd26-a10a67688b68
 # ╟─d0e65b25-0ea7-46c1-ac15-99eea43b6ade
 # ╟─77c1d355-8a7e-414e-9e0e-8eda1fbbbf1d
 # ╠═f3077d61-cb49-4efb-aac0-66e8de6e15ae

@@ -58,7 +58,7 @@ module ERKModule
     
     	# Define relevant data for E-SINDy
     	time = df.time
-    	X = [df.R_fit df.Ras_fit df.Raf_fit df.NFB_fit df.PFB_fit]
+    	X = [df.R_fit df.Ras_fit df.Raf_fit df.MEK_fit df.PFB_fit]
     	GT = (0.75 .* df.PFB_fit .* 
     		(1 .- df.Raf_fit) ./ (0.01 .+ (1 .- df.Raf_fit)))
     	Y = df.NN_approx
@@ -89,9 +89,9 @@ module ERKModule
     function build_basis(x, i)
         
         # Define a basis of functions to estimate the unknown equation of GFs model
-    	gf_h = DataDrivenDiffEq.polynomial_basis(x, 2)
-    	gf_basis = DataDrivenDiffEq.Basis([gf_h; gf_h .* i], x, implicits=i)
-        return gf_basis
+    	h = DataDrivenDiffEq.polynomial_basis(x, 2)
+    	basis = DataDrivenDiffEq.Basis([h; h .* i], x, implicits=i)
+        return basis
     end
 end
 
@@ -179,9 +179,9 @@ module NFBModule
     function build_basis(x)
     
         # Define a basis of functions to estimate the unknown equation of NFB model
-    	nfb_h = DataDrivenDiffEq.monomial_basis(x, 3)
-    	nfb_basis = DataDrivenDiffEq.Basis(nfb_h, x, iv=t)
-        return nfb_basis
+    	h = DataDrivenDiffEq.monomial_basis(x, 3)
+    	basis = DataDrivenDiffEq.Basis(h, x, iv=t)
+        return basis
     end
 end
 
