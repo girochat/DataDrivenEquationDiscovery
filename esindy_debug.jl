@@ -189,7 +189,7 @@ function create_erk_data(files, smoothing=0.)
 
 	# Define relevant data for E-SINDy
 	time = df.time
-	X = [df.R_fit df.Ras_fit df.Raf_fit df.MEK_fit df.PFB_fit] #[df.Raf_fit df.PFB_fit] # 
+	X = [df.Raf_fit df.PFB_fit] # # [df.R_fit df.Ras_fit df.Raf_fit df.MEK_fit df.PFB_fit]
 	GT = (0.75 .* df.PFB_fit .* 
 		(1 .- df.Raf_fit) ./ (0.01 .+ (1 .- df.Raf_fit)))
 	Y = df.NN_approx
@@ -246,8 +246,8 @@ end
 # ╔═╡ e81310b5-63e1-45b8-ba4f-81751d0fcc06
 begin
 	# Define a basis of functions to estimate the unknown equation of GFs model
-	erk_h = DataDrivenDiffEq.polynomial_basis(x[1:5], 2)
-	erk_basis = DataDrivenDiffEq.Basis([erk_h; erk_h .* i], x[1:5], implicits=i[1:1])
+	erk_h = DataDrivenDiffEq.polynomial_basis(x[1:2], 2)
+	erk_basis = DataDrivenDiffEq.Basis([erk_h; erk_h .* i], x[1:2], implicits=i[1:1])
 end
 
 # ╔═╡ 219b794d-9f51-441b-9197-b8ef0c4495b4
@@ -451,7 +451,39 @@ function build_equations(coef, basis, verbose=true)
 end
 
 # ╔═╡ d7e68526-5ba9-41ed-9669-e7a289db1e93
+function compute_MC_CI(data, mean_coef, sem_coef, basis, confidence)
+    
+	n_simulations = 1000
+	results = zeros(n_simulations, size(data.time, 1))
 
+	draw_coef = zeros(size(mean_coef))
+	indices = findall(!iszero, mean_coef)
+	coef_distrib = [Normal(mean_coef[k], sem_coef[k]) for k in indices]
+
+	current_coef = zeros(size(mean_coef))
+	
+    for i in 1:n_simulations
+		sample = [rand(distrib) for distrib in coef_distrib]
+		current_coef[indices] = sample
+		current_y = build_equations(current_coef, basis, false)
+		current_y_vals = [current_y[1](x) for x in eachrow([data.X[1:801,:] data.Y[1:801]])]
+	
+        # Calculate function value
+        results[i, :] = current_y_vals
+	end
+	
+	if confidence > 1
+		confidence = confidence / 100
+	end
+	
+    # Calculate confidence interval
+    lower_percentile = (1 - confidence) / 2
+    upper_percentile = 1 - lower_percentile
+    ci = mapslices(row -> quantile(row, [lower_percentile, upper_percentile]),
+		results, dims=1)
+
+    return ci
+end
 
 # ╔═╡ 30ae9b9d-1f10-4cc8-b605-096badd27f4a
 # ╠═╡ disabled = true
@@ -536,6 +568,9 @@ end
 # Complete E-SINDy function 
 function esindy(data, basis, n_bstrap, coef_threshold=15)
 
+	#if lib_esindy
+		
+
 	# Run sindy bootstraps
 	bootstrap_res = sindy_bootstrap(data, basis, n_bstrap)
 
@@ -561,9 +596,6 @@ md"""
 md"""
 ##### Run E-SINDy
 """
-
-# ╔═╡ ea3d58a1-e37f-4f61-b003-e1c19a60bf7f
-lib_coef = library_bootstrap(ngf_data, erk_basis, 100, 10)
 
 # ╔═╡ b73f3450-acfd-4b9e-9b7f-0f7289a62976
 # ╠═╡ disabled = true
@@ -611,8 +643,7 @@ md"""
 """
 
 # ╔═╡ 04538fbf-63b7-4394-b281-f047d0c3ea51
-#JLD2.@save "./Data/ngf_esindy_1000bt.jld2" ngf_results
-#JLD2.@save "./Data/ngf_esindy_100bt.jld2" ngf_results
+#JLD2.@save "./Data/ngf_esindy_100bt.jld2" results
 
 # ╔═╡ cef23151-ada1-40e6-9d3f-2c67114a1546
 md"""
@@ -632,8 +663,45 @@ begin
 	JLD2.@load "./Data/ngf_esindy_1000bt.jld2" ngf_results
 	e_coef, sem_coef = compute_coef_stat(ngf_results, 20)
 	y = build_equations(e_coef, erk_basis)
-	p = plot_esindy(ngf_data, y, erk_basis, 95)
+	p = plot_esindy(ngf_data, y, erk_basis)
 	plot(p[1], title="E-SINDy results for ERK model\nafter NGF stimulation\n")
+end
+
+# ╔═╡ 030c2038-386e-45f1-a2c2-dd10f0fd13f5
+begin
+	n_simulations = 1000
+	results = zeros(n_simulations, size(ngf_data.time[1:801], 1))
+
+	draw_coef = zeros(size(e_coef))
+	indices = findall(!iszero, e_coef)
+	coef_distrib = [Normal(e_coef[k], sem_coef[k]) for k in indices]
+
+	current_coef = zeros(size(e_coef))
+	p_ci = plot([], [])
+	
+    for i in 1:n_simulations
+		sample = [rand(distrib) for distrib in coef_distrib]
+		current_coef[indices] = sample
+		current_y = build_equations(current_coef, erk_basis, false)
+		current_y_vals = [current_y[1](x) for x in eachrow([ngf_data.X[1:801,:] ngf_data.Y[1:801]])]
+	
+        # Calculate function value
+        results[i, :] = current_y_vals
+		plot!(p_ci, current_y_vals)
+    end
+
+	confidence = 95
+	
+	if confidence > 1
+		confidence = confidence / 100
+	end
+	
+    # Calculate confidence interval
+    lower_percentile = (1 - confidence) / 2
+    upper_percentile = 1 - lower_percentile
+    ci = mapslices(row -> quantile(row, [lower_percentile, upper_percentile]), results, dims=1)
+	plot(p_ci)
+	ci
 end
 
 # ╔═╡ d0e65b25-0ea7-46c1-ac15-99eea43b6ade
@@ -649,11 +717,10 @@ md"""
 # ╔═╡ f3077d61-cb49-4efb-aac0-66e8de6e15ae
 # ╠═╡ disabled = true
 #=╠═╡
-esindy_res = e_sindy(df_a, nfb_basis, nfb_dd_prob, 20, 65)
+a_res = e_sindy(a_data, nfb_basis, 20, 65)
   ╠═╡ =#
 
 # ╔═╡ d10c9991-ada5-4239-8b1a-5d9baaf27a1a
-#=╠═╡
 begin
 	# Plot E-SINDy results
 	subplots = deepcopy(esindy_res.plots)
@@ -665,12 +732,9 @@ begin
 
 	plot(subplots[1], subplots[2], layout=(2,1), size=(600, 800))
 end
-  ╠═╡ =#
 
 # ╔═╡ c20a0b57-28a2-49b0-abf5-22e4b8f61b12
-#=╠═╡
 esindy_res.coef_mean
-  ╠═╡ =#
 
 # ╔═╡ 6d7969d7-5753-4f4e-bace-7de3a542103e
 md"""
@@ -746,9 +810,9 @@ esindy_res_ab.coef_mean
 # ╟─fd914104-90da-469c-a80f-f068cac51a1c
 # ╟─af06c850-2e8b-4b4b-9d0f-02e645a79743
 # ╟─b549bff5-d8e9-4f41-96d6-2d562584ccd9
-# ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
+# ╠═6c7929f5-15b2-4e19-8c26-e709f0da182e
 # ╟─447a8dec-ae5c-4ffa-b672-4f829c23eb1f
-# ╟─f598564e-990b-436e-aa97-b2239b44f6d8
+# ╠═f598564e-990b-436e-aa97-b2239b44f6d8
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
 # ╟─ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
@@ -762,13 +826,13 @@ esindy_res_ab.coef_mean
 # ╟─79b03041-01e6-4d8e-b900-446511c81058
 # ╟─74b2ade4-884b-479d-9fee-828d37d7ab47
 # ╟─97ae69f0-764a-4aff-88cd-91accf6bb3fd
-# ╟─d7e68526-5ba9-41ed-9669-e7a289db1e93
+# ╠═030c2038-386e-45f1-a2c2-dd10f0fd13f5
+# ╠═d7e68526-5ba9-41ed-9669-e7a289db1e93
 # ╟─30ae9b9d-1f10-4cc8-b605-096badd27f4a
 # ╠═cc2395cc-00df-4e5e-8573-e85ce813fd41
 # ╠═012a5186-03aa-482d-bb62-ecba49587877
 # ╟─569c7600-246b-4a64-bba5-1e74a5888d8c
 # ╟─1f3f1461-09f1-4825-bb99-4064e075e23e
-# ╠═ea3d58a1-e37f-4f61-b003-e1c19a60bf7f
 # ╠═b73f3450-acfd-4b9e-9b7f-0f7289a62976
 # ╠═25e99792-0f37-4bd5-98e3-5eed1302f915
 # ╠═de4c57fe-1a29-4354-a5fe-f4e184de4dd3
