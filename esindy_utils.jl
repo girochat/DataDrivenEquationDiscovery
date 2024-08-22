@@ -44,10 +44,10 @@ module ERKModule
     function create_data(files, smoothing=0.)
 
         # Load data into dataframe
-        df = CSV.read("./Data/$(files[1])", DataFrame)
+        df = CSV.read(files[1], DataFrame)
         if length(files) > 1
             for i in 2:length(files)
-                df2 = CSV.read("./Data/$(files[i])", DataFrame)
+                df2 = CSV.read(files[i], DataFrame)
                 df = vcat(df, df2)
             end
         end
@@ -138,10 +138,10 @@ module NFBModule
     function create_data(files)
     
     	# Load data into dataframe
-    	df = CSV.read("./Data/$(files[1])", DataFrame)
+    	df = CSV.read(files[1], DataFrame)
     	if length(files) > 1
     	    for i in 2:length(files)
-    	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
+    	        df2 = CSV.read(files[i], DataFrame)
     	        df = vcat(df, df2)
     	    end
     	end
@@ -208,10 +208,18 @@ module ESINDyModule
     export objective
     export get_best_hyperparameters
     export sindy_bootstrap
+    export library_bootstrap
     export compute_coef_stat
     export build_equations
     export plot_esindy
     export e_sindy
+
+    # Declare necessary symbolic variables for the bases
+    @ModelingToolkit.variables x[1:7] i[1:1]
+    @ModelingToolkit.parameters t
+    x = collect(x)
+    i = collect(i)
+
 
     # Define a sampling method and the options for the data driven problem
     global sampler = DataDrivenDiffEq.DataProcessing(split = 0.8, shuffle = true, batchsize = 100)
@@ -264,7 +272,7 @@ module ESINDyModule
     
     	@info "E-SINDy Bootstrapping:"
     	@progress name="Bootstrapping" threshold=0.01 for i in 1:n_bstraps
-    
+   	      
     		# Define data driven problem with bootstrapped data
     		rand_ind = rand(1:size(data.X, 1), size(data.X, 1))
     		X = data.X[rand_ind,:]

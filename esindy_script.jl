@@ -22,7 +22,6 @@ include("esindy_utils.jl")
 using .ESINDyModule
 
 
-
 ### USER-DEFINED parameters (model type, frequency, GF concentration)
 
 # Retrieve file arguments
@@ -42,15 +41,15 @@ else
     files = ARGS[6:end]
 
     println("Running E-SINDy for $(model) model with $(n_bstraps) bootstraps. 
-        Coefficient threshold set to $(coef_threshold).")
+	    Coefficient threshold set to $(coef_threshold).")
+    flush(stdout)
 end
 
-if model == "erk"
+if model == "ERK"
     using .ERKModule
 else
     using .NFBModule
 end
-
 
 
 ##### Import the data #####
@@ -68,7 +67,7 @@ basis = build_basis(x[1:size(data.X, 2)], i)
 
 
 ##### Run Library E-SINDy #####
-lib_coefficients = library_bootstrap(data, basis, 5000, 10)
+lib_coefficients = library_bootstrap(data, basis, n_bstraps, 10)
 
 ##### Run E-SINDy (b(r)agging) #####
 #results = e_sindy(data, basis, n_bstraps, coef_threshold, CI_confidence) 
@@ -76,6 +75,7 @@ lib_coefficients = library_bootstrap(data, basis, 5000, 10)
 #results = (library_esindy = lib_coefficients, esindy_results = results)
 
 # save results
+println("Saving results to ./Data/$(filename).jld2.")
 JLD2.@save "./Data/$(filename).jld2" lib_coefficients
 
 
