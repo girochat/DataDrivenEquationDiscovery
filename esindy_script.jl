@@ -36,9 +36,8 @@ else
     model = uppercase(ARGS[1])
     n_bstraps = parse(Int, ARGS[2])
     coef_threshold = parse(Int, ARGS[3])
-    CI_confidence = parse(Int, ARGS[4])
-    filename = ARGS[5]
-    files = ARGS[6:end]
+    filename = ARGS[4]
+    files = ARGS[5:end]
 
     println("Running E-SINDy for $(model) model with $(n_bstraps) bootstraps. 
 Coefficient threshold set to $(coef_threshold).\n")
@@ -67,15 +66,15 @@ basis = build_basis(x[1:size(data.X, 2)], i)
 
 
 ##### Run Library E-SINDy #####
-lib_coefficients = library_bootstrap(data, basis, n_bstraps, 10)
+#lib_coefficients = library_bootstrap(data, basis, n_bstraps, 10)
 
 ##### Run E-SINDy (b(r)agging) #####
-#results = e_sindy(data, basis, n_bstraps, coef_threshold, CI_confidence) 
+results = e_sindy(data, basis, n_bstraps, coef_threshold) 
 
 #results = (library_esindy = lib_coefficients, esindy_results = results)
 
 # save results
 println("Saving results to ./Data/$(filename).jld2.")
-JLD2.@save "./Data/$(filename).jld2" lib_coefficients
+JLD2.@save "./Data/$(filename).jld2" results
 
 

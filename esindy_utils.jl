@@ -58,7 +58,7 @@ module ERKModule
     
     	# Define relevant data for E-SINDy
     	time = df.time
-    	X = [df.R_fit df.Ras_fit df.Raf_fit df.MEK_fit df.PFB_fit]
+    	X = [df.Raf_fit df.PFB_fit] #[df.R_fit df.Ras_fit df.Raf_fit df.MEK_fit df.PFB_fit]
     	GT = (0.75 .* df.PFB_fit .* 
     		(1 .- df.Raf_fit) ./ (0.01 .+ (1 .- df.Raf_fit)))
     	Y = df.NN_approx
@@ -211,6 +211,8 @@ module ESINDyModule
     export library_bootstrap
     export compute_coef_stat
     export build_equations
+    export get_yvals
+    export compute_CI
     export plot_esindy
     export e_sindy
 
@@ -223,8 +225,8 @@ module ESINDyModule
 
     # Define a sampling method and the options for the data driven problem
     global sampler = DataDrivenDiffEq.DataProcessing(split = 0.8, shuffle = true, batchsize = 100)
-    global options = DataDrivenDiffEq.DataDrivenCommonOptions(data_processing = sampler, digits=1, abstol=1e-10, reltol=1e-10, 
-                                                                denoise=true)
+    global options = DataDrivenDiffEq.DataDrivenCommonOptions(data_processing = sampler, digits=1, 
+    abstol=1e-10, reltol=1e-10, denoise=true)
     
     function print_flush(message)
          println(message)
@@ -275,6 +277,9 @@ module ESINDyModule
     	n_eqs = size(data.Y, 2)
     	l_basis = length(basis)
     	bootstrap_coef = zeros(n_bstraps, n_eqs, l_basis)
+
+        # Track best hyperparameters
+    	hyperparam = (λ = [], ν = [])
     
     	print_flush("Starting E-SINDy Bootstrapping:")
     	for j in 1:n_bstraps
@@ -298,17 +303,23 @@ module ESINDyModule
     
     		# Solve problem with optimal hyperparameters
     		best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
+            push!(hyperparam.λ, best_λ)
+    		push!(hyperparam.ν, best_ν)
+        
     		if with_implicits
-    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), 
-                    options=options)
+    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
+                ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), 
+                options=options)
     
     		else
-    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options) 			
+    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
+                DataDrivenSparse.SR3(best_λ, best_ν), 
+                options = options) 			
     
     		end
     		bootstrap_coef[j,:,:] = best_res.out[1].coefficients	
     	end
-    	return bootstrap_coef 
+    	return bootstrap_coef, hyperparam
     end
 
 
@@ -344,9 +355,13 @@ module ESINDyModule
     		dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(data.X', data.Y')
     		best_λ, best_ν = get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
     		if with_implicits
-    			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
+    			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis,
+                ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), 
+                options=options)
     		else
-    			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options) 			
+    			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, 
+                DataDrivenSparse.SR3(best_λ, best_ν), 
+                options = options) 			
     
     		end
     		bootstrap_coef[j,:,rand_ind] = best_res.out[1].coefficients
@@ -418,29 +433,73 @@ module ESINDyModule
     	return y
     end
     
+
+
+    function get_yvals(data, equations)
+    	n_eqs = length(equations)
     
+    	yvals = []
+    	for eq in equations
+    		push!(yvals, [eq(x) for x in eachrow([data.X ngf_data.Y])])
+    	end
+    	return yvals
+    end
+
+
+
+    # Fucntion to compute the confidence interval of the estimated equation
+    function compute_CI(data, mean_coef, sem_coef, basis, confidence)
     
-    # Plotting function for E-SINDy results
-    function plot_esindy(data, y, ci_coef, basis, confidence)
+    	# Build normal distribution for non-zero coefficients
+    	indices = findall(!iszero, mean_coef)
+    	coef_distrib = [Normal(mean_coef[k], sem_coef[k]) for k in indices]
+    
+    	# Run MC simulations to estimate the distribution of estimated equation 
+    	n_simulations = 1000
+    	results = zeros(n_simulations, size(data.time, 1))
+    	current_coef = zeros(size(mean_coef))
+        for i in 1:n_simulations
+    		sample = [rand(distrib) for distrib in coef_distrib]
+    		current_coef[indices] = sample
+    		current_y = build_equations(current_coef, basis, false)
+    		current_y_vals = [current_y[1](x) for x in eachrow([data.X data.Y])]
     	
-    	# Get the quantile corresponding to the confidence interval
-    	Z = Normal()
-    	if 0 <= confidence <= 1
-    		q = quantile(Z, confidence)
-    	else
-    		q = quantile(Z, confidence/100)
+            # Calculate function value
+            results[i, :] = current_y_vals
     	end
+    	
+    	if confidence > 1
+    		confidence = confidence / 100
+    	end
+    	
+        # Calculate confidence interval
+        lower_percentile = (1 - confidence) / 2
+        upper_percentile = 1 - lower_percentile
+        ci = mapslices(row -> quantile(row, [lower_percentile, upper_percentile]),
+    		results, dims=1)
     
-    	# Obtain the equations for the SEM (standard error of the mean)
-    	if sum(ci_coef) != 0
-    		ci_y = build_equations(ci_coef, basis, false)
-    	end
-    		
+        return (ci_low=ci[1,:], ci_up=ci[2,:])
+    end
+
+
+
+    # Plotting function for E-SINDy results
+    function plot_esindy(results; sample_ids=nothing, confidence=0)
+    
     	# Retrieve the number of samples
+    	data, basis, y = results.data, results.basis, results.equations
     	n_samples = sum(data.time .== 0)
-    	size_sample = Int(length(ngf_data.time) / n_samples)
+    	if isnothing(sample_ids)
+    		sample_ids = 1:n_samples
+    	end
+    	size_sample = Int(length(data.time) / n_samples)
     
-    	# Plot results with CI
+    	# Compute confidence interval if necessary
+    	if confidence > 0
+    		ci_low, ci_up = compute_CI(data, results.mean_coef, results.sem_coef, basis, confidence)
+    	end
+    	
+    	# Plot results
     	n_eqs = size(y, 1)
     	subplots = []
     	palette = colorschemes[:seaborn_colorblind] # [:vik10]
@@ -451,28 +510,33 @@ module ESINDyModule
     		else
     			p = plot(title="", xlabel="Time", ylabel="Model species y(t)")
     		end
-    		
+    
+    		# Plot each sample separately
     		for sample in 0:(n_samples-1)
-    			i_start = 1 + sample * size_sample
-    			i_end = i_start + size_sample - 1
-    			i_color = ceil(Int, 1 + sample * (length(palette) / n_samples))
-    			
-    			y_vals = [y[i](x) for x in eachrow([ngf_data.X[i_start:i_end,:] ngf_data.Y[i_start:i_end]])] 
-    			if length(y_vals) == 1
-    				y_vals = repeat([y_vals], size_sample)
+    			if sample in sample_ids
+    				
+    				i_start = 1 + sample * size_sample
+    				i_end = i_start + size_sample - 1
+    				i_color = ceil(Int, 1 + sample * (length(palette) / n_samples))
+                    				
+    				y_vals = [y[i](x) for x in eachrow([data.X[i_start:i_end,:] data.Y[i_start:i_end]])] 
+    				if length(y_vals) == 1
+    					y_vals = repeat([y_vals], size_sample)
+    				end
+    
+    				if confidence > 0
+    					plot!(p, data.time[i_start:i_end], y_vals, label=data.labels[sample+1], 
+                            color=palette[i_color],
+                            ribbon=(y_vals-ci_low[i_start:i_end], ci_up[i_start:i_end]-y_vals), 
+                            fillalpha=0.15)
+    				else
+    					plot!(p, data.time[i_start:i_end], y_vals, label=data.labels[sample+1],
+                            color=palette[i_color])
+    				end
+    				
+    				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end], label="", linestyle=:dash, 
+                        color=palette[i_color])
     			end
-    			
-    			ci_vals = [ci_y[1](x) for x in eachrow([ngf_data.X[i_start:i_end,:] ngf_data.Y[i_start:i_end]])] 
-    
-    			if length(ci_vals) == 1
-    				ci_vals = repeat([ci_vals], size_sample)
-    			end
-    
-    			plot!(p, ngf_data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color], 
-                    ribbon=q .* (ci_vals-y_vals), fillalpha=0.15)
-    
-    			plot!(p, ngf_data.time[i_start:i_end], ngf_data.GT[i_start:i_end], label="", 
-                    linestyle=:dash, color=palette[i_color])
     		end
     		plot!(p, [], [],  label="GT", color=:black, linestyle=:dash)
     		push!(subplots, p)
@@ -482,10 +546,10 @@ module ESINDyModule
     
     
     # Complete E-SINDy function 
-    function e_sindy(data, basis, n_bstrap, coef_threshold=15, confidence=95)
+    function esindy(data, basis, n_bstrap=100; coef_threshold=15)
     
     	# Run sindy bootstraps
-    	bootstrap_res = sindy_bootstrap(data, basis, n_bstrap)
+    	bootstrap_res, hyperparameters = sindy_bootstrap(data, basis, n_bstrap)
     
     	# Compute the mean and std of ensemble coefficients
     	e_coef, coef_sem = compute_coef_stat(bootstrap_res, coef_threshold)
@@ -493,10 +557,12 @@ module ESINDyModule
     	# Build the final equation as callable functions
     	println("E-SINDy estimated equations:")
     	y = build_equations(e_coef, basis)
-    
-    	# Plot result
-    	plots = plot_esindy(data, y, coef_sem, basis, confidence)
     	
-    	return (equations=y, bootstraps=bootstrap_res, coef_mean=e_coef, coef_sem=coef_sem, plots=plots)
+    	return (data=data, 
+            basis=basis, 
+            equations=y, 
+            bootstraps=bootstrap_res, 
+            coef_mean=e_coef, 
+            coef_sem=coef_sem,
+            hyperparameters=hyperparameters)
     end
-end
