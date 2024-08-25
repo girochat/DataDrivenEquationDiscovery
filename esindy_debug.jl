@@ -297,9 +297,6 @@ function get_best_hyperparameters(dd_prob, basis, with_implicits)
 	return hp_res.best_trial.values[:λ], hp_res.best_trial.values[:ν]
 end
 
-# ╔═╡ cdf0a900-938a-4333-ad77-903bf591d706
-
-
 # ╔═╡ 5ef43425-ca26-430c-a62d-e194a8b1aebb
 md"""
 ##### E-SINDy Bootstrapping
@@ -313,6 +310,8 @@ function sindy_bootstrap(data, basis, n_bstraps)
 	n_eqs = size(data.Y, 2)
 	l_basis = length(basis)
 	bootstrap_coef = zeros(n_bstraps, n_eqs, l_basis)
+
+	hyperparam = (λ = [], ν = [])
 
 	@info "E-SINDy Bootstrapping:"
 	@progress name="Bootstrapping" threshold=0.01 for i in 1:n_bstraps
@@ -335,6 +334,9 @@ function sindy_bootstrap(data, basis, n_bstraps)
 
 		# Solve problem with optimal hyperparameters
 		best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
+		push!(hyperparam.λ, best_λ)
+		push!(hyperparam.ν, best_ν)
+		
 		if with_implicits
 			best_res = DataDrivenDiffEq.solve(dd_prob, basis, ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
 
@@ -347,7 +349,7 @@ function sindy_bootstrap(data, basis, n_bstraps)
 		bootstrap_coef[i,:,:] = best_res.out[1].coefficients
 		
 	end
-	return bootstrap_coef 
+	return bootstrap_coef, hyperparam
 end
 
 # ╔═╡ 79b03041-01e6-4d8e-b900-446511c81058
@@ -501,7 +503,7 @@ end
 
 # ╔═╡ cc2395cc-00df-4e5e-8573-e85ce813fd41
 # Plotting function for E-SINDy results
-function plot_esindy(results; sample_ids=nothing, confidence=0) #data, y, basis, mean_coef, sem_coef, sample_ids=nothing, confidence=0)
+function plot_esindy(results; sample_ids=nothing, confidence=0)
 
 	# Retrieve the number of samples
 	data, basis, y = results.data, results.basis, results.equations
@@ -559,11 +561,10 @@ end
 
 # ╔═╡ 012a5186-03aa-482d-bb62-ecba49587877
 # Complete E-SINDy function 
-function esindy(data, basis, n_bstrap=100, coef_threshold=15, sample_ids=nothing,
-	confidence=0)
+function esindy(data, basis, n_bstrap=100; coef_threshold=15)
 
 	# Run sindy bootstraps
-	bootstrap_res = sindy_bootstrap(data, basis, n_bstrap)
+	bootstrap_res, hyperparameters = sindy_bootstrap(data, basis, n_bstrap)
 
 	# Compute the mean and std of ensemble coefficients
 	e_coef, coef_sem = compute_coef_stat(bootstrap_res, coef_threshold)
@@ -571,11 +572,8 @@ function esindy(data, basis, n_bstrap=100, coef_threshold=15, sample_ids=nothing
 	# Build the final equation as callable functions
 	println("E-SINDy estimated equations:")
 	y = build_equations(e_coef, basis)
-
-	# Plot result
-	#plots = plot_esindy(data, y, basis, e_coef, sem_coef, sample_ids = sample_ids, confidence=confidence)
 	
-	return (data=data, basis=basis, equations=y, bootstraps=bootstrap_res, coef_mean=e_coef, coef_sem=coef_sem) #, plots=plots)
+	return (data=data, basis=basis, equations=y, bootstraps=bootstrap_res, coef_mean=e_coef, coef_sem=coef_sem, hyperparameters=hyperparameters)
 end
 
 # ╔═╡ 569c7600-246b-4a64-bba5-1e74a5888d8c
@@ -589,26 +587,13 @@ md"""
 """
 
 # ╔═╡ b73f3450-acfd-4b9e-9b7f-0f7289a62976
-# ╠═╡ disabled = true
-#=╠═╡
-ngf_res = esindy(ngf_data, erk_basis, 20, 15) 
-  ╠═╡ =#
-
-# ╔═╡ 3bd630ad-f546-4b0b-8f3e-98367de739b1
-md"""
-##### Plot the results
-"""
-
-# ╔═╡ de4c57fe-1a29-4354-a5fe-f4e184de4dd3
-#=╠═╡
 begin
-	y_vals = [ngf_res.equations[1](x) for x in eachrow([ngf_data.X[1:801,:] ngf_data.Y[1:801]])]
-	plot(y_vals, ribbon=(y_vals - lower_b[1:801], upper_b[1:801] - y_vals))
-	#plot!(y_vals)
-	#
-	#plot(y_vals, ribbon=200 * (-ci_vals-y_vals))
+	ngf_esindy_res = esindy(ngf_data, erk_basis, 100)
+	#egf_esindy_res = esindy(egf_data, erk_basis, 100)
 end
-  ╠═╡ =#
+
+# ╔═╡ ac172561-f25a-4192-8636-b76c01bde9d7
+histogram([l[1] for l in ngf_esindy_res.hyperparameters])
 
 # ╔═╡ 02c625dc-9d21-488e-983b-c3e2c40e0aad
 md"""
@@ -616,7 +601,10 @@ md"""
 """
 
 # ╔═╡ 04538fbf-63b7-4394-b281-f047d0c3ea51
-#JLD2.@save "./Data/ngf_esindy_100bt.jld2" results ## !! need also to store the data and the basis
+begin
+	#JLD2.@save "./Data/ngf_esindy_100bt.jld2" ngf_esindy_res
+	#JLD2.@save "./Data/egf_esindy_100bt.jld2" egf_esindy_res
+end
 
 # ╔═╡ cef23151-ada1-40e6-9d3f-2c67114a1546
 md"""
@@ -635,21 +623,32 @@ function print_jld_key(filename)
 end
 
 # ╔═╡ 9224f09a-50fd-4889-b6d0-bb2b100af191
-print_jld_key("./Data/ngf_esindy_1000bt_20pc.jld2")
+begin
+	print_jld_key("./Data/ngf_esindy_100bt.jld2")
+	#print_jld_key("./Data/egf_esindy_100bt.jld2")
+end
 
 # ╔═╡ 53bc1c92-cf25-4de0-99f2-9bdaa754ea18
 begin
-	JLD2.@load "./Data/ngf_esindy_1000bt_20pc.jld2" ngf_esindy_results
-	#e_coef, sem_coef = compute_coef_stat(ngf_results, 20)
-	#y = build_equations(e_coef, erk_basis)
-	#temp_results = (data = ngf_data, basis=erk_basis, equations=y, bootstrap_res=ngf_results, mean_coef=e_coef, sem_coef=sem_coef)
- 
+	#JLD2.@load "./Data/ngf_esindy_100bt.jld2" ngf_esindy_res
+	#JLD2.@load "./Data/egf_esindy_100bt.jld2" egf_esindy_res 
 end
 
-# ╔═╡ 5209ba58-08b7-4a50-8088-ebdba2881d09
+# ╔═╡ 3bd630ad-f546-4b0b-8f3e-98367de739b1
+md"""
+##### Plot the results
+"""
+
+# ╔═╡ de4c57fe-1a29-4354-a5fe-f4e184de4dd3
 begin
-	p = plot_esindy(ngf_esindy_results, sample_ids=[1, 2, 5], confidence=95)
-	plot(p[1], title="E-SINDy results for ERK model\nafter NGF stimulation\n")
+	ngf_plot = plot_esindy(ngf_esindy_res, confidence=95)[1]
+	plot(ngf_plot, title="E-SINDy results for ERK model\nafter NGF stimulation\n")
+end
+
+# ╔═╡ 664b3e67-09d3-4e98-a946-ffbcbed0fe90
+begin
+	egf_plot = plot_esindy(egf_esindy_res, confidence=95)[1]
+	plot(egf_plot, title="E-SINDy results for ERK model\nafter EGF stimulation\n")
 end
 
 # ╔═╡ da599511-3c54-4241-941a-1b9ab8c83c2c
@@ -664,7 +663,7 @@ print_jld_key("./Data/lib_coef.jld2")
 JLD2.@load "./Data/lib_coef.jld2" lib_coefficients
 
 # ╔═╡ 0f45643e-4120-4993-8b77-7ae069984c78
-
+full_erk_basis = 
 
 # ╔═╡ 9780c83f-f577-4519-9ec2-16dcea70d543
 begin
@@ -793,7 +792,6 @@ esindy_res_ab.coef_mean
 # ╟─4646bfce-f8cc-4d24-b461-753daff50f71
 # ╟─034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╟─0f7076ef-848b-4b3c-b918-efb6419787be
-# ╠═cdf0a900-938a-4333-ad77-903bf591d706
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
 # ╟─c7e825a3-8ce6-48fc-86ac-21810d32bbfb
 # ╟─79b03041-01e6-4d8e-b900-446511c81058
@@ -806,15 +804,16 @@ esindy_res_ab.coef_mean
 # ╟─569c7600-246b-4a64-bba5-1e74a5888d8c
 # ╟─1f3f1461-09f1-4825-bb99-4064e075e23e
 # ╠═b73f3450-acfd-4b9e-9b7f-0f7289a62976
-# ╟─3bd630ad-f546-4b0b-8f3e-98367de739b1
-# ╠═de4c57fe-1a29-4354-a5fe-f4e184de4dd3
+# ╠═ac172561-f25a-4192-8636-b76c01bde9d7
 # ╟─02c625dc-9d21-488e-983b-c3e2c40e0aad
 # ╠═04538fbf-63b7-4394-b281-f047d0c3ea51
 # ╟─cef23151-ada1-40e6-9d3f-2c67114a1546
 # ╟─9662aac5-d773-4508-a643-813130f53e5b
 # ╠═9224f09a-50fd-4889-b6d0-bb2b100af191
 # ╠═53bc1c92-cf25-4de0-99f2-9bdaa754ea18
-# ╠═5209ba58-08b7-4a50-8088-ebdba2881d09
+# ╟─3bd630ad-f546-4b0b-8f3e-98367de739b1
+# ╠═de4c57fe-1a29-4354-a5fe-f4e184de4dd3
+# ╠═664b3e67-09d3-4e98-a946-ffbcbed0fe90
 # ╟─da599511-3c54-4241-941a-1b9ab8c83c2c
 # ╟─9c88fba8-287a-4b9e-a12d-5211d67cead4
 # ╟─6735065b-3bed-4924-8ab1-a0402c3e8be8
