@@ -297,6 +297,9 @@ function get_best_hyperparameters(dd_prob, basis, with_implicits)
 	return hp_res.best_trial.values[:λ], hp_res.best_trial.values[:ν]
 end
 
+# ╔═╡ cdf0a900-938a-4333-ad77-903bf591d706
+
+
 # ╔═╡ 5ef43425-ca26-430c-a62d-e194a8b1aebb
 md"""
 ##### E-SINDy Bootstrapping
@@ -493,17 +496,26 @@ function compute_CI(data, mean_coef, sem_coef, basis, confidence)
     ci = mapslices(row -> quantile(row, [lower_percentile, upper_percentile]),
 		results, dims=1)
 
-    return ci
+    return (ci_low=ci[1,:], ci_up=ci[2,:])
 end
 
 # ╔═╡ cc2395cc-00df-4e5e-8573-e85ce813fd41
 # Plotting function for E-SINDy results
-function plot_esindy(data, y, basis, indices=nothing, with_ci=false)
+function plot_esindy(results; sample_ids=nothing, confidence=0) #data, y, basis, mean_coef, sem_coef, sample_ids=nothing, confidence=0)
 
 	# Retrieve the number of samples
+	data, basis, y = results.data, results.basis, results.equations
 	n_samples = sum(data.time .== 0)
-	size_sample = Int(length(ngf_data.time) / n_samples)
+	if isnothing(sample_ids)
+		sample_ids = 1:n_samples
+	end
+	size_sample = Int(length(data.time) / n_samples)
 
+	# Compute confidence interval if necessary
+	if confidence > 0
+		ci_low, ci_up = compute_CI(data, results.mean_coef, results.sem_coef, basis, confidence)
+	end
+	
 	# Plot results
 	n_eqs = size(y, 1)
 	subplots = []
@@ -518,19 +530,26 @@ function plot_esindy(data, y, basis, indices=nothing, with_ci=false)
 
 		# Plot each sample separately
 		for sample in 0:(n_samples-1)
-			i_start = 1 + sample * size_sample
-			i_end = i_start + size_sample - 1
-			i_color = ceil(Int, 1 + sample * (length(palette) / n_samples))
-			
-			y_vals = [y[i](x) for x in eachrow([ngf_data.X[i_start:i_end,:] ngf_data.Y[i_start:i_end]])] 
-			if length(y_vals) == 1
-				y_vals = repeat([y_vals], size_sample)
+			if sample in sample_ids
+				
+				i_start = 1 + sample * size_sample
+				i_end = i_start + size_sample - 1
+				i_color = ceil(Int, 1 + sample * (length(palette) / n_samples))
+				
+				y_vals = [y[i](x) for x in eachrow([data.X[i_start:i_end,:] data.Y[i_start:i_end]])] 
+				if length(y_vals) == 1
+					y_vals = repeat([y_vals], size_sample)
+				end
+
+				if confidence > 0
+					plot!(p, data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color],
+					ribbon=(y_vals-ci_low[i_start:i_end], ci_up[i_start:i_end]-y_vals), fillalpha=0.15)
+				else
+					plot!(p, data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color])
+				end
+				
+				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end], label="", linestyle=:dash, color=palette[i_color])
 			end
-
-			plot!(p, ngf_data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color])
-
-			plot!(p, ngf_data.time[i_start:i_end], ngf_data.GT[i_start:i_end], label="", linestyle=:dash, color=palette[i_color])
-
 		end
 		plot!(p, [], [],  label="GT", color=:black, linestyle=:dash)
 		push!(subplots, p)
@@ -540,10 +559,8 @@ end
 
 # ╔═╡ 012a5186-03aa-482d-bb62-ecba49587877
 # Complete E-SINDy function 
-function esindy(data, basis, n_bstrap, coef_threshold=15)
-
-	#if lib_esindy
-		
+function esindy(data, basis, n_bstrap=100, coef_threshold=15, sample_ids=nothing,
+	confidence=0)
 
 	# Run sindy bootstraps
 	bootstrap_res = sindy_bootstrap(data, basis, n_bstrap)
@@ -556,9 +573,9 @@ function esindy(data, basis, n_bstrap, coef_threshold=15)
 	y = build_equations(e_coef, basis)
 
 	# Plot result
-	plots = plot_esindy(data, y, basis)
+	#plots = plot_esindy(data, y, basis, e_coef, sem_coef, sample_ids = sample_ids, confidence=confidence)
 	
-	return (equations=y, bootstraps=bootstrap_res, coef_mean=e_coef, coef_sem=coef_sem, plots=plots)
+	return (data=data, basis=basis, equations=y, bootstraps=bootstrap_res, coef_mean=e_coef, coef_sem=coef_sem) #, plots=plots)
 end
 
 # ╔═╡ 569c7600-246b-4a64-bba5-1e74a5888d8c
@@ -593,11 +610,6 @@ begin
 end
   ╠═╡ =#
 
-# ╔═╡ 770e5ae1-2baf-4edb-bed5-470d7664aad1
-#=╠═╡
-plot(ngf_res.plots[1])
-  ╠═╡ =#
-
 # ╔═╡ 02c625dc-9d21-488e-983b-c3e2c40e0aad
 md"""
 ##### Save the results (JLD2 file)
@@ -611,33 +623,58 @@ md"""
 ##### Load the results (JLD2 file)
 """
 
-# ╔═╡ 9224f09a-50fd-4889-b6d0-bb2b100af191
-begin
+# ╔═╡ 9662aac5-d773-4508-a643-813130f53e5b
+function print_jld_key(filename)
 	# To see which key(s) were used to store the object in the jld2 file
-	file = jldopen("./Data/ngf_esindy_100bt.jld2", "r")
-	println(keys(file))
+	file = jldopen(filename, "r")
+	jdl_keys = keys(file)
+	for key in jdl_keys
+		println(key)
+	end
 	close(file)
 end
 
+# ╔═╡ 9224f09a-50fd-4889-b6d0-bb2b100af191
+print_jld_key("./Data/ngf_esindy_1000bt_20pc.jld2")
+
 # ╔═╡ 53bc1c92-cf25-4de0-99f2-9bdaa754ea18
 begin
-	JLD2.@load "./Data/ngf_esindy_1000bt.jld2" ngf_results
-	e_coef, sem_coef = compute_coef_stat(ngf_results, 20)
-	y = build_equations(e_coef, erk_basis)
-	p = plot_esindy(ngf_data, y, erk_basis)
+	JLD2.@load "./Data/ngf_esindy_1000bt_20pc.jld2" ngf_esindy_results
+	#e_coef, sem_coef = compute_coef_stat(ngf_results, 20)
+	#y = build_equations(e_coef, erk_basis)
+	#temp_results = (data = ngf_data, basis=erk_basis, equations=y, bootstrap_res=ngf_results, mean_coef=e_coef, sem_coef=sem_coef)
+ 
+end
+
+# ╔═╡ 5209ba58-08b7-4a50-8088-ebdba2881d09
+begin
+	p = plot_esindy(ngf_esindy_results, sample_ids=[1, 2, 5], confidence=95)
 	plot(p[1], title="E-SINDy results for ERK model\nafter NGF stimulation\n")
 end
 
-# ╔═╡ ec614cd9-757c-4567-83cf-eeb5b6a59e75
+# ╔═╡ da599511-3c54-4241-941a-1b9ab8c83c2c
+md"""
+##### Analyse library E-SINDy results
+"""
+
+# ╔═╡ 9c88fba8-287a-4b9e-a12d-5211d67cead4
+print_jld_key("./Data/lib_coef.jld2")
+
+# ╔═╡ 6735065b-3bed-4924-8ab1-a0402c3e8be8
+JLD2.@load "./Data/lib_coef.jld2" lib_coefficients
+
+# ╔═╡ 0f45643e-4120-4993-8b77-7ae069984c78
+
+
+# ╔═╡ 9780c83f-f577-4519-9ec2-16dcea70d543
 begin
-	ci = compute_CI(ngf_data, e_coef, sem_coef, erk_basis, 95)
+	lib_indices = [id[2] for id in findall(!iszero, compute_coef_stat(lib_coefficients, 2)[1])]
+	erk_basis[lib_indices]
+	
 end
 
-# ╔═╡ 7f60f90e-aa54-400d-ab31-f0d3aeb5277f
-begin
-	y_vals = get_yvals(ngf_data, y)[1][1:801]
-	plot(ngf_data.time[1:801], y_vals, ribbon=(y_vals-ci[1,1:801], ci[2,1:801]-y_vals))
-end
+# ╔═╡ 748100c5-61ca-4417-99d4-2f9103648f31
+length(erk_basis[lib_indices])
 
 # ╔═╡ d0e65b25-0ea7-46c1-ac15-99eea43b6ade
 md"""
@@ -756,6 +793,7 @@ esindy_res_ab.coef_mean
 # ╟─4646bfce-f8cc-4d24-b461-753daff50f71
 # ╟─034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╟─0f7076ef-848b-4b3c-b918-efb6419787be
+# ╠═cdf0a900-938a-4333-ad77-903bf591d706
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
 # ╟─c7e825a3-8ce6-48fc-86ac-21810d32bbfb
 # ╟─79b03041-01e6-4d8e-b900-446511c81058
@@ -770,14 +808,19 @@ esindy_res_ab.coef_mean
 # ╠═b73f3450-acfd-4b9e-9b7f-0f7289a62976
 # ╟─3bd630ad-f546-4b0b-8f3e-98367de739b1
 # ╠═de4c57fe-1a29-4354-a5fe-f4e184de4dd3
-# ╠═770e5ae1-2baf-4edb-bed5-470d7664aad1
 # ╟─02c625dc-9d21-488e-983b-c3e2c40e0aad
 # ╠═04538fbf-63b7-4394-b281-f047d0c3ea51
 # ╟─cef23151-ada1-40e6-9d3f-2c67114a1546
+# ╟─9662aac5-d773-4508-a643-813130f53e5b
 # ╠═9224f09a-50fd-4889-b6d0-bb2b100af191
 # ╠═53bc1c92-cf25-4de0-99f2-9bdaa754ea18
-# ╠═ec614cd9-757c-4567-83cf-eeb5b6a59e75
-# ╠═7f60f90e-aa54-400d-ab31-f0d3aeb5277f
+# ╠═5209ba58-08b7-4a50-8088-ebdba2881d09
+# ╟─da599511-3c54-4241-941a-1b9ab8c83c2c
+# ╟─9c88fba8-287a-4b9e-a12d-5211d67cead4
+# ╟─6735065b-3bed-4924-8ab1-a0402c3e8be8
+# ╠═0f45643e-4120-4993-8b77-7ae069984c78
+# ╠═9780c83f-f577-4519-9ec2-16dcea70d543
+# ╠═748100c5-61ca-4417-99d4-2f9103648f31
 # ╟─d0e65b25-0ea7-46c1-ac15-99eea43b6ade
 # ╟─77c1d355-8a7e-414e-9e0e-8eda1fbbbf1d
 # ╠═f3077d61-cb49-4efb-aac0-66e8de6e15ae
