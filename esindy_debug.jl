@@ -255,6 +255,9 @@ md"""
 ##### Set up the hyperparameter optimisation
 """
 
+# ╔═╡ c141f7a8-b0b3-456a-93fb-5824e97b0380
+
+
 # ╔═╡ 4646bfce-f8cc-4d24-b461-753daff50f71
 begin
 	# Define a sampling method and the options for the data driven problem
@@ -451,22 +454,22 @@ function build_equations(coef, basis, verbose=true)
 end
 
 # ╔═╡ d7e68526-5ba9-41ed-9669-e7a289db1e93
-function compute_MC_CI(data, mean_coef, sem_coef, basis, confidence)
-    
-	n_simulations = 1000
-	results = zeros(n_simulations, size(data.time, 1))
+# Fucntion to compute the confidence interval of the estimated equation
+function compute_CI(data, mean_coef, sem_coef, basis, confidence)
 
-	draw_coef = zeros(size(mean_coef))
+	# Build normal distribution for non-zero coefficients
 	indices = findall(!iszero, mean_coef)
 	coef_distrib = [Normal(mean_coef[k], sem_coef[k]) for k in indices]
 
+	# Run MC simulations to estimate the distribution of estimated equation 
+	n_simulations = 1000
+	results = zeros(n_simulations, size(data.time, 1))
 	current_coef = zeros(size(mean_coef))
-	
     for i in 1:n_simulations
 		sample = [rand(distrib) for distrib in coef_distrib]
 		current_coef[indices] = sample
 		current_y = build_equations(current_coef, basis, false)
-		current_y_vals = [current_y[1](x) for x in eachrow([data.X[1:801,:] data.Y[1:801]])]
+		current_y_vals = [current_y[1](x) for x in eachrow([data.X data.Y])]
 	
         # Calculate function value
         results[i, :] = current_y_vals
@@ -485,46 +488,9 @@ function compute_MC_CI(data, mean_coef, sem_coef, basis, confidence)
     return ci
 end
 
-# ╔═╡ 30ae9b9d-1f10-4cc8-b605-096badd27f4a
-# ╠═╡ disabled = true
-#=╠═╡
-# Compute the confidence interval by estimating the upper and lower boundary function
-function compute_CI(data, mean_coef, sem_coef, basis)
-	lower_b = repeat([Inf], size(data.time, 1))
-	upper_b = repeat([-Inf], size(data.time, 1))
-
-	# Find indices where the SEM coefficients are non-zero
-	non_zero_idx = findall(!iszero, sem_coef)
-	n_coef = length(non_zero_idx)
-
-	# For the number of non-zero coef. do all possible combinations of +, - operations
-	operations = []
-	combs = collect(with_replacement_combinations([+, -], n_coef))
-	for comb in combs
-	    perms = permutations(comb)
-	    append!(operations, collect(perms))
-	end
-	operations = unique!(operations)
-	
-	# Estimate the upper and lower boundary function given a combination of SEM coef.
-	ci_coef = zeros(size(mean_coef))
-	for operation in operations
-		for i in 1:n_coef
-			i_coef = non_zero_idx[i]
-			ci_coef[i_coef] = operation[i](mean_coef[i_coef], sem_coef[i_coef])
-		end
-		ci_y = build_equations(ci_coef, basis, false)
-		ci_y_vals = [ci_y[1](x) for x in eachrow(ngf_data.X)]
-		lower_b = min.(lower_b, ci_y_vals)
-		upper_b = max.(upper_b, ci_y_vals)
-	end
-	return (lower_b=lower_b, upper_b=upper_b)
-end
-  ╠═╡ =#
-
 # ╔═╡ cc2395cc-00df-4e5e-8573-e85ce813fd41
 # Plotting function for E-SINDy results
-function plot_esindy(data, y, basis)
+function plot_esindy(data, y, basis, indices=nothing, with_ci=false)
 
 	# Retrieve the number of samples
 	n_samples = sum(data.time .== 0)
@@ -603,10 +569,10 @@ md"""
 ngf_res = esindy(ngf_data, erk_basis, 20, 15) 
   ╠═╡ =#
 
-# ╔═╡ 25e99792-0f37-4bd5-98e3-5eed1302f915
-#=╠═╡
-lower_b, upper_b = compute_CI(ngf_data, ngf_res.coef_mean, ngf_res.coef_sem, erk_basis)
-  ╠═╡ =#
+# ╔═╡ 3bd630ad-f546-4b0b-8f3e-98367de739b1
+md"""
+##### Plot the results
+"""
 
 # ╔═╡ de4c57fe-1a29-4354-a5fe-f4e184de4dd3
 #=╠═╡
@@ -617,19 +583,6 @@ begin
 	#
 	#plot(y_vals, ribbon=200 * (-ci_vals-y_vals))
 end
-  ╠═╡ =#
-
-# ╔═╡ 445c83aa-7b15-4c19-bdea-a1b9bb3c5e45
-#=╠═╡
-begin
-	plot(lower_b[1:801])
-	plot!([ngf_res.equations[1](x) for x in eachrow(ngf_data.X[1:801,:])])
-end
-  ╠═╡ =#
-
-# ╔═╡ 722d4036-f405-4815-a99e-87bdc6981923
-#=╠═╡
-plot(ngf_res.plots[1])
   ╠═╡ =#
 
 # ╔═╡ 770e5ae1-2baf-4edb-bed5-470d7664aad1
@@ -643,7 +596,7 @@ md"""
 """
 
 # ╔═╡ 04538fbf-63b7-4394-b281-f047d0c3ea51
-#JLD2.@save "./Data/ngf_esindy_100bt.jld2" results
+#JLD2.@save "./Data/ngf_esindy_100bt.jld2" results ## !! need also to store the data and the basis
 
 # ╔═╡ cef23151-ada1-40e6-9d3f-2c67114a1546
 md"""
@@ -667,41 +620,11 @@ begin
 	plot(p[1], title="E-SINDy results for ERK model\nafter NGF stimulation\n")
 end
 
-# ╔═╡ 030c2038-386e-45f1-a2c2-dd10f0fd13f5
+# ╔═╡ ec614cd9-757c-4567-83cf-eeb5b6a59e75
 begin
-	n_simulations = 1000
-	results = zeros(n_simulations, size(ngf_data.time[1:801], 1))
-
-	draw_coef = zeros(size(e_coef))
-	indices = findall(!iszero, e_coef)
-	coef_distrib = [Normal(e_coef[k], sem_coef[k]) for k in indices]
-
-	current_coef = zeros(size(e_coef))
-	p_ci = plot([], [])
-	
-    for i in 1:n_simulations
-		sample = [rand(distrib) for distrib in coef_distrib]
-		current_coef[indices] = sample
-		current_y = build_equations(current_coef, erk_basis, false)
-		current_y_vals = [current_y[1](x) for x in eachrow([ngf_data.X[1:801,:] ngf_data.Y[1:801]])]
-	
-        # Calculate function value
-        results[i, :] = current_y_vals
-		plot!(p_ci, current_y_vals)
-    end
-
-	confidence = 95
-	
-	if confidence > 1
-		confidence = confidence / 100
-	end
-	
-    # Calculate confidence interval
-    lower_percentile = (1 - confidence) / 2
-    upper_percentile = 1 - lower_percentile
-    ci = mapslices(row -> quantile(row, [lower_percentile, upper_percentile]), results, dims=1)
-	plot(p_ci)
-	ci
+	ci = compute_CI(ngf_data, e_coef, sem_coef, erk_basis, 95)
+	y_vals1 = [y[1](x) for x in eachrow([ngf_data.X[1:801,:] ngf_data.Y[1:801]])]
+	plot(ngf_data.time[1:801], y_vals1, ribbon=(y_vals1-ci[1,1:801], ci[2,1:801]-y_vals1))
 end
 
 # ╔═╡ d0e65b25-0ea7-46c1-ac15-99eea43b6ade
@@ -810,15 +733,16 @@ esindy_res_ab.coef_mean
 # ╟─fd914104-90da-469c-a80f-f068cac51a1c
 # ╟─af06c850-2e8b-4b4b-9d0f-02e645a79743
 # ╟─b549bff5-d8e9-4f41-96d6-2d562584ccd9
-# ╠═6c7929f5-15b2-4e19-8c26-e709f0da182e
+# ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
 # ╟─447a8dec-ae5c-4ffa-b672-4f829c23eb1f
-# ╠═f598564e-990b-436e-aa97-b2239b44f6d8
+# ╟─f598564e-990b-436e-aa97-b2239b44f6d8
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
 # ╟─ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
 # ╟─e81310b5-63e1-45b8-ba4f-81751d0fcc06
 # ╟─219b794d-9f51-441b-9197-b8ef0c4495b4
-# ╟─4646bfce-f8cc-4d24-b461-753daff50f71
+# ╠═c141f7a8-b0b3-456a-93fb-5824e97b0380
+# ╠═4646bfce-f8cc-4d24-b461-753daff50f71
 # ╟─034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╟─0f7076ef-848b-4b3c-b918-efb6419787be
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
@@ -826,24 +750,21 @@ esindy_res_ab.coef_mean
 # ╟─79b03041-01e6-4d8e-b900-446511c81058
 # ╟─74b2ade4-884b-479d-9fee-828d37d7ab47
 # ╟─97ae69f0-764a-4aff-88cd-91accf6bb3fd
-# ╠═030c2038-386e-45f1-a2c2-dd10f0fd13f5
 # ╠═d7e68526-5ba9-41ed-9669-e7a289db1e93
-# ╟─30ae9b9d-1f10-4cc8-b605-096badd27f4a
 # ╠═cc2395cc-00df-4e5e-8573-e85ce813fd41
 # ╠═012a5186-03aa-482d-bb62-ecba49587877
 # ╟─569c7600-246b-4a64-bba5-1e74a5888d8c
 # ╟─1f3f1461-09f1-4825-bb99-4064e075e23e
 # ╠═b73f3450-acfd-4b9e-9b7f-0f7289a62976
-# ╠═25e99792-0f37-4bd5-98e3-5eed1302f915
+# ╟─3bd630ad-f546-4b0b-8f3e-98367de739b1
 # ╠═de4c57fe-1a29-4354-a5fe-f4e184de4dd3
-# ╠═445c83aa-7b15-4c19-bdea-a1b9bb3c5e45
-# ╠═722d4036-f405-4815-a99e-87bdc6981923
 # ╠═770e5ae1-2baf-4edb-bed5-470d7664aad1
 # ╟─02c625dc-9d21-488e-983b-c3e2c40e0aad
 # ╠═04538fbf-63b7-4394-b281-f047d0c3ea51
 # ╟─cef23151-ada1-40e6-9d3f-2c67114a1546
 # ╠═9224f09a-50fd-4889-b6d0-bb2b100af191
 # ╠═53bc1c92-cf25-4de0-99f2-9bdaa754ea18
+# ╠═ec614cd9-757c-4567-83cf-eeb5b6a59e75
 # ╟─d0e65b25-0ea7-46c1-ac15-99eea43b6ade
 # ╟─77c1d355-8a7e-414e-9e0e-8eda1fbbbf1d
 # ╠═f3077d61-cb49-4efb-aac0-66e8de6e15ae
