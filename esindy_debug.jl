@@ -255,13 +255,10 @@ md"""
 ##### Set up the hyperparameter optimisation
 """
 
-# ╔═╡ c141f7a8-b0b3-456a-93fb-5824e97b0380
-
-
 # ╔═╡ 4646bfce-f8cc-4d24-b461-753daff50f71
 begin
 	# Define a sampling method and the options for the data driven problem
-	sampler = DataDrivenDiffEq.DataProcessing(split = 0.8, shuffle = true, batchsize = 100)
+	sampler = DataDrivenDiffEq.DataProcessing(split = 0.8, shuffle = true, batchsize = 400)
 	options = DataDrivenDiffEq.DataDrivenCommonOptions(data_processing = sampler, digits=1, abstol=1e-10, reltol=1e-10, denoise=true)
 end
 
@@ -453,6 +450,17 @@ function build_equations(coef, basis, verbose=true)
 	return y
 end
 
+# ╔═╡ 74066f54-6e50-4db0-a98f-dc1eb9999899
+function get_yvals(data, equations)
+	n_eqs = length(equations)
+
+	yvals = []
+	for eq in equations
+		push!(yvals, [eq(x) for x in eachrow([data.X ngf_data.Y])])
+	end
+	return yvals
+end
+
 # ╔═╡ d7e68526-5ba9-41ed-9669-e7a289db1e93
 # Fucntion to compute the confidence interval of the estimated equation
 function compute_CI(data, mean_coef, sem_coef, basis, confidence)
@@ -623,8 +631,12 @@ end
 # ╔═╡ ec614cd9-757c-4567-83cf-eeb5b6a59e75
 begin
 	ci = compute_CI(ngf_data, e_coef, sem_coef, erk_basis, 95)
-	y_vals1 = [y[1](x) for x in eachrow([ngf_data.X[1:801,:] ngf_data.Y[1:801]])]
-	plot(ngf_data.time[1:801], y_vals1, ribbon=(y_vals1-ci[1,1:801], ci[2,1:801]-y_vals1))
+end
+
+# ╔═╡ 7f60f90e-aa54-400d-ab31-f0d3aeb5277f
+begin
+	y_vals = get_yvals(ngf_data, y)[1][1:801]
+	plot(ngf_data.time[1:801], y_vals, ribbon=(y_vals-ci[1,1:801], ci[2,1:801]-y_vals))
 end
 
 # ╔═╡ d0e65b25-0ea7-46c1-ac15-99eea43b6ade
@@ -741,8 +753,7 @@ esindy_res_ab.coef_mean
 # ╟─ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
 # ╟─e81310b5-63e1-45b8-ba4f-81751d0fcc06
 # ╟─219b794d-9f51-441b-9197-b8ef0c4495b4
-# ╠═c141f7a8-b0b3-456a-93fb-5824e97b0380
-# ╠═4646bfce-f8cc-4d24-b461-753daff50f71
+# ╟─4646bfce-f8cc-4d24-b461-753daff50f71
 # ╟─034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╟─0f7076ef-848b-4b3c-b918-efb6419787be
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
@@ -750,8 +761,9 @@ esindy_res_ab.coef_mean
 # ╟─79b03041-01e6-4d8e-b900-446511c81058
 # ╟─74b2ade4-884b-479d-9fee-828d37d7ab47
 # ╟─97ae69f0-764a-4aff-88cd-91accf6bb3fd
-# ╠═d7e68526-5ba9-41ed-9669-e7a289db1e93
-# ╠═cc2395cc-00df-4e5e-8573-e85ce813fd41
+# ╟─74066f54-6e50-4db0-a98f-dc1eb9999899
+# ╟─d7e68526-5ba9-41ed-9669-e7a289db1e93
+# ╟─cc2395cc-00df-4e5e-8573-e85ce813fd41
 # ╠═012a5186-03aa-482d-bb62-ecba49587877
 # ╟─569c7600-246b-4a64-bba5-1e74a5888d8c
 # ╟─1f3f1461-09f1-4825-bb99-4064e075e23e
@@ -765,6 +777,7 @@ esindy_res_ab.coef_mean
 # ╠═9224f09a-50fd-4889-b6d0-bb2b100af191
 # ╠═53bc1c92-cf25-4de0-99f2-9bdaa754ea18
 # ╠═ec614cd9-757c-4567-83cf-eeb5b6a59e75
+# ╠═7f60f90e-aa54-400d-ab31-f0d3aeb5277f
 # ╟─d0e65b25-0ea7-46c1-ac15-99eea43b6ade
 # ╟─77c1d355-8a7e-414e-9e0e-8eda1fbbbf1d
 # ╠═f3077d61-cb49-4efb-aac0-66e8de6e15ae
