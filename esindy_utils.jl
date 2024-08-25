@@ -197,7 +197,7 @@ module ESINDyModule
     using Statistics, Plots
     
     # External libraries
-    using HyperTuning, StableRNGs, Distributions, ColorSchemes, ProgressLogging
+    using HyperTuning, StableRNGs, Distributions, ColorSchemes
     
     # Packages under development (debugging)
     using DataDrivenDiffEq, DataDrivenSparse
@@ -225,6 +225,12 @@ module ESINDyModule
     global sampler = DataDrivenDiffEq.DataProcessing(split = 0.8, shuffle = true, batchsize = 100)
     global options = DataDrivenDiffEq.DataDrivenCommonOptions(data_processing = sampler, digits=1, abstol=1e-10, reltol=1e-10, 
                                                                 denoise=true)
+    
+    function print_flush(message)
+         println(message)
+	 flush(stdout)
+    end
+
 
     # Objective function for hyperparameter optimisation
     function objective(trial, dd_prob, basis, with_implicits)
@@ -270,9 +276,13 @@ module ESINDyModule
     	l_basis = length(basis)
     	bootstrap_coef = zeros(n_bstraps, n_eqs, l_basis)
     
-    	@info "E-SINDy Bootstrapping:"
-    	@progress name="Bootstrapping" threshold=0.01 for i in 1:n_bstraps
-   	      
+    	print_flush("Starting E-SINDy Bootstrapping:")
+    	for j in 1:n_bstraps
+   	   	
+                if j % 10 == 0
+		    print_flush("Bootstrap $(i)/$(n_bstraps)")
+		end
+	     
     		# Define data driven problem with bootstrapped data
     		rand_ind = rand(1:size(data.X, 1), size(data.X, 1))
     		X = data.X[rand_ind,:]
@@ -296,7 +306,7 @@ module ESINDyModule
     			best_res = DataDrivenDiffEq.solve(dd_prob, basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options) 			
     
     		end
-    		bootstrap_coef[i,:,:] = best_res.out[1].coefficients	
+    		bootstrap_coef[j,:,:] = best_res.out[1].coefficients	
     	end
     	return bootstrap_coef 
     end
@@ -310,10 +320,14 @@ module ESINDyModule
     	l_basis = length(basis)
     	bootstrap_coef = zeros(n_bstraps, n_eqs, l_basis)
     
-    	@info "Library E-SINDy Bootstrapping:"
-    	@progress name="Bootstrapping" threshold=0.01 for j in 1:n_bstraps
-    					
-    		# Define data driven problem with bootstrapped data
+    	print_flush("Starting E-SINDy Library Bootstrapping:")
+    	for j in 1:n_bstraps
+   	   	
+                if j % 10 == 0
+		    print_flush("Bootstrap $(j)/$(n_bstraps)")
+		end
+    		
+		# Define data driven problem with bootstrapped data
     		rand_ind = sample(1:l_basis, n_libterms, replace=false)
     		
     		# Check if the problem involves implicits

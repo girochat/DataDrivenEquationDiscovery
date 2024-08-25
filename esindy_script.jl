@@ -5,7 +5,7 @@ import ModelingToolkit, Symbolics
 using Statistics, Plots, CSV, DataFrames
 
 # External libraries
-using HyperTuning, StableRNGs, Distributions, SmoothingSplines, Logging, ColorSchemes, JLD2, ProgressLogging
+using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ColorSchemes, JLD2
 
 # Packages under development (debugging)
 using DataDrivenDiffEq, DataDrivenSparse
@@ -41,7 +41,7 @@ else
     files = ARGS[6:end]
 
     println("Running E-SINDy for $(model) model with $(n_bstraps) bootstraps. 
-	    Coefficient threshold set to $(coef_threshold).")
+Coefficient threshold set to $(coef_threshold).\n")
     flush(stdout)
 end
 
