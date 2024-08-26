@@ -69,7 +69,7 @@ basis = build_basis(x[1:size(data.X, 2)], i)
 #lib_coefficients = library_bootstrap(data, basis, n_bstraps, 10)
 
 ##### Run E-SINDy (b(r)agging) #####
-results = e_sindy(data, basis, n_bstraps, coef_threshold) 
+results = esindy(data, basis, n_bstraps, coef_threshold=coef_threshold) 
 
 #results = (library_esindy = lib_coefficients, esindy_results = results)
 

@@ -214,7 +214,7 @@ module ESINDyModule
     export get_yvals
     export compute_CI
     export plot_esindy
-    export e_sindy
+    export esindy
 
     # Declare necessary symbolic variables for the bases
     @ModelingToolkit.variables x[1:7] i[1:1]
@@ -566,3 +566,4 @@ module ESINDyModule
             coef_sem=coef_sem,
             hyperparameters=hyperparameters)
     end
+end
