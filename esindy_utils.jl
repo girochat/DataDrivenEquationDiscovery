@@ -284,9 +284,9 @@ module ESINDyModule
     	print_flush("Starting E-SINDy Bootstrapping:")
     	for j in 1:n_bstraps
    	   	
-                if j % 10 == 0
-		    print_flush("Bootstrap $(i)/$(n_bstraps)")
-		end
+            if j % 10 == 0
+                print_flush("Bootstrap $(i)/$(n_bstraps)")
+            end
 	     
     		# Define data driven problem with bootstrapped data
     		rand_ind = rand(1:size(data.X, 1), size(data.X, 1))
@@ -304,7 +304,7 @@ module ESINDyModule
     		# Solve problem with optimal hyperparameters
     		best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
             push!(hyperparam.λ, best_λ)
-    		push!(hyperparam.ν, best_ν)
+        	push!(hyperparam.ν, best_ν)
         
     		if with_implicits
     			best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
@@ -334,11 +334,11 @@ module ESINDyModule
     	print_flush("Starting E-SINDy Library Bootstrapping:")
     	for j in 1:n_bstraps
    	   	
-                if j % 10 == 0
-		    print_flush("Bootstrap $(j)/$(n_bstraps)")
-		end
+            if j % 10 == 0
+    		    print_flush("Bootstrap $(j)/$(n_bstraps)")
+    		end
     		
-		# Define data driven problem with bootstrapped data
+    		# Define data driven problem with bootstrapped data
     		rand_ind = sample(1:l_basis, n_libterms, replace=false)
     		
     		# Check if the problem involves implicits
