@@ -135,7 +135,7 @@ module NFBModule
 
     
     # Create E-SINDy compatible data structure out of dataframes
-    function create_data(files)
+    function create_data(files, smoothing=0.)
     
     	# Load data into dataframe
     	df = CSV.read(files[1], DataFrame)
@@ -147,7 +147,7 @@ module NFBModule
     	end
     
     	# Create labels for plotting and retrieve NFB case
-    	labels, case = make_nfb_labels(files)
+    	labels, case = make_labels(files)
     
     	# Retrieve the number of samples
     	n_samples = sum(df.time .== 0)
@@ -176,11 +176,11 @@ module NFBModule
 
 
     # Function to build a basis
-    function build_basis(x)
+    function build_basis(x, i)
     
         # Define a basis of functions to estimate the unknown equation of NFB model
     	h = DataDrivenDiffEq.monomial_basis(x, 3)
-    	basis = DataDrivenDiffEq.Basis(h, x, iv=t)
+    	basis = DataDrivenDiffEq.Basis(h, x)
         return basis
     end
 end
@@ -197,7 +197,7 @@ module ESINDyModule
     using Statistics, Plots
     
     # External libraries
-    using HyperTuning, StableRNGs, Distributions, ColorSchemes
+    using HyperTuning, StableRNGs, Distributions, ColorSchemes, ProgressMeter
     
     # Packages under development (debugging)
     using DataDrivenDiffEq, DataDrivenSparse
@@ -227,11 +227,14 @@ module ESINDyModule
     global sampler = DataDrivenDiffEq.DataProcessing(split = 0.8, shuffle = true, batchsize = 400)
     global options = DataDrivenDiffEq.DataDrivenCommonOptions(data_processing = sampler, digits=1, 
     abstol=1e-10, reltol=1e-10, denoise=true)
-    
+
+
+
     function print_flush(message)
-         println(message)
-	 flush(stdout)
+        println(message)
+        flush(stdout)
     end
+    
 
 
     # Objective function for hyperparameter optimisation
@@ -253,13 +256,14 @@ module ESINDyModule
     	return bic(res_dd)
     end
     
-    
+   
+ 
     # Hyperparameter optimisation function
     function get_best_hyperparameters(dd_prob, basis, with_implicits)
     	
     	# Define the range of hyperparameters to consider
-    	scenario = Scenario(λ = 1e-2:1e-3:9e-1, ν = exp10.(-2:1:3),
-    		max_trials = 500, 
+    	scenario = Scenario(λ = (3e-1..9e-1), ν = (1e-1..10),
+    		max_trials = 300, 
     		sampler=HyperTuning.RandomSampler())
     
     	# Find optimal hyperparameters
@@ -271,7 +275,7 @@ module ESINDyModule
     
     
     # Bootstrapping function that estimate optimal library coefficients given data
-    function sindy_bootstrap(data, basis, n_bstraps)
+    function sindy_bootstrap(data, basis, n_bstraps, data_fraction)
     
     	# Initialise the coefficient array
     	n_eqs = size(data.Y, 2)
@@ -280,16 +284,18 @@ module ESINDyModule
 
         # Track best hyperparameters
     	hyperparam = (λ = [], ν = [])
-    
+
+        # Track progress while using parallelisation
+        progress = []        
+ 
     	print_flush("Starting E-SINDy Bootstrapping:")
-    	for j in 1:n_bstraps
-            if j % 10 == 0
-                print_flush("Bootstrap $(j)/$(n_bstraps)")
-            end
+    	Threads.@threads for j in 1:n_bstraps
 	     
-    	    # Define data driven problem with bootstrapped data
-    	    rand_ind = rand(1:size(data.X, 1), size(data.X, 1))
-    	    X = data.X[rand_ind,:]
+            # Define how much of the data is sampled
+    	    rand_ind = rand(1:size(data.X, 1), floor(Int, size(data.X, 1) * data_fraction))
+    	    
+		    # Define data driven problem with bootstrapped data
+            X = data.X[rand_ind,:]
     	    Y = data.Y[rand_ind,:]
     	    dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y')
     
@@ -301,31 +307,31 @@ module ESINDyModule
     		end
     
     		# Solve problem with optimal hyperparameters
-    		result = @timed begin
-				best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
-			end
-			print_flush("HP: $(result)")
+			best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
             push!(hyperparam.λ, best_λ)
         	push!(hyperparam.ν, best_ν)
         
     		if with_implicits
-    			optim_results = @timed begin
-                    best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
+                best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
                                 ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), 
                                 options=options)
-                end
-                print_flush("Optim time: $(optim_results)")
-    
     		else
     			best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
                 DataDrivenSparse.SR3(best_λ, best_ν), 
                 options = options) 			
     
     	    end
-    	    bootstrap_coef[j,:,:] = best_res.out[1].coefficients	
+    	    bootstrap_coef[j,:,:] = best_res.out[1].coefficients
+           
+            # Print progress 
+            push!(progress, j)
+            if length(progress) % 10 == 0
+                print_flush("Progress: $(length(progress))/$(n_bstraps)")
+            end            
     	end
     	return bootstrap_coef, hyperparam
     end
+
 
 
     # Bootstrapping function that estimate optimal library terms given data
@@ -551,10 +557,10 @@ module ESINDyModule
     
     
     # Complete E-SINDy function 
-    function esindy(data, basis, n_bstrap=100; coef_threshold=15)
+    function esindy(data, basis, n_bstrap=100; coef_threshold=15, data_fraction=1)
     
     	# Run sindy bootstraps
-    	bootstrap_res, hyperparameters = sindy_bootstrap(data, basis, n_bstrap)
+    	bootstrap_res, hyperparameters = sindy_bootstrap(data, basis, n_bstrap, data_fraction)
     
     	# Compute the mean and std of ensemble coefficients
     	e_coef, coef_sem = compute_coef_stat(bootstrap_res, coef_threshold)
