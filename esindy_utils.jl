@@ -224,7 +224,7 @@ module ESINDyModule
 
 
     # Define a sampling method and the options for the data driven problem
-    global sampler = DataDrivenDiffEq.DataProcessing(split = 0.8, shuffle = true, batchsize = 100)
+    global sampler = DataDrivenDiffEq.DataProcessing(split = 0.8, shuffle = true, batchsize = 400)
     global options = DataDrivenDiffEq.DataDrivenCommonOptions(data_processing = sampler, digits=1, 
     abstol=1e-10, reltol=1e-10, denoise=true)
     
@@ -260,7 +260,7 @@ module ESINDyModule
     	# Define the range of hyperparameters to consider
     	scenario = Scenario(λ = 1e-2:1e-3:9e-1, ν = exp10.(-2:1:3),
     		max_trials = 500, 
-    		sampler=HyperTuning.RandomSampler(), batch_size=1)
+    		sampler=HyperTuning.RandomSampler())
     
     	# Find optimal hyperparameters
     	hp_res = HyperTuning.optimize(trial -> objective(trial, dd_prob, basis, with_implicits), scenario)
@@ -283,16 +283,15 @@ module ESINDyModule
     
     	print_flush("Starting E-SINDy Bootstrapping:")
     	for j in 1:n_bstraps
-   	   	
             if j % 10 == 0
-                print_flush("Bootstrap $(i)/$(n_bstraps)")
+                print_flush("Bootstrap $(j)/$(n_bstraps)")
             end
 	     
-    		# Define data driven problem with bootstrapped data
-    		rand_ind = rand(1:size(data.X, 1), size(data.X, 1))
-    		X = data.X[rand_ind,:]
-    		Y = data.Y[rand_ind,:]
-    		dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y')
+    	    # Define data driven problem with bootstrapped data
+    	    rand_ind = rand(1:size(data.X, 1), size(data.X, 1))
+    	    X = data.X[rand_ind,:]
+    	    Y = data.Y[rand_ind,:]
+    	    dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y')
     
     		# Check if the problem involves implicits
     		implicits = implicit_variables(basis)
@@ -302,22 +301,28 @@ module ESINDyModule
     		end
     
     		# Solve problem with optimal hyperparameters
-    		best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
+    		result = @timed begin
+				best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
+			end
+			print_flush("HP: $(result)")
             push!(hyperparam.λ, best_λ)
         	push!(hyperparam.ν, best_ν)
         
     		if with_implicits
-    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
-                ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), 
-                options=options)
+    			optim_results = @timed begin
+                    best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
+                                ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), 
+                                options=options)
+                end
+                print_flush("Optim time: $(optim_results)")
     
     		else
     			best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
                 DataDrivenSparse.SR3(best_λ, best_ν), 
                 options = options) 			
     
-    		end
-    		bootstrap_coef[j,:,:] = best_res.out[1].coefficients	
+    	    end
+    	    bootstrap_coef[j,:,:] = best_res.out[1].coefficients	
     	end
     	return bootstrap_coef, hyperparam
     end
