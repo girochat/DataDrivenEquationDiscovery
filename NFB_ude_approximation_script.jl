@@ -20,7 +20,7 @@ gr()
 
 # Retrieve file arguments
 if length(ARGS) < 2
-    error("Error! You need to specify as arguments: \n-input concentration\n-Type of NFB (no/a/b/ab)")
+    error("Error! You need to specify as arguments: \n-Input concentration\n-Type of NFB (no/a/b/ab)")
 else
     println("")
     input_CC = parse(Float64, ARGS[1])
