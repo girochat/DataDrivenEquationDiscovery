@@ -59,12 +59,14 @@ To run the NFB model UDE approximation script:
 
 To run the ERK model UDE approximation script:
 
-    julia --project=. ERK_ude_approximation_script.jl <Type of input concentration (high/low)> <Growth factor type (EGF/NGF)> <pulse duration> <pulse frequency>
-
-[!NOTE] The E-SINDy script and notebook cannot yet be run due to bugs in the DataDrivenDiffEq.jl package. 
+    julia --project=. ERK_ude_approximation_script.jl <Type of input concentration (high/low)> <Growth factor type (EGF/NGF)> <pulse duration> <pulse frequency>  
 
 
 ##### 3. Run E-SINDy script
+
+**Note:** 
+The E-SINDy script and notebook cannot yet be run due to bugs in the DataDrivenDiffEq.jl package. 
+
 Any output obtained with the UDE approximation scripts (CSV format) can be used to run the E-SINDy script. It also takes file arguments:
 
     julia --project=. esindy_script.jl <model type (NFB/ERK)> <Number of bootstraps> <Coefficient threshold> <Output filename> <List of CSV files>
@@ -78,22 +80,22 @@ Provided here are HTML versions of the Pluto notebooks. They can be run without 
 This project relies on several important Julia packages for data-driven modeling and differential equations:
 
 - **ModelingToolkit.jl**  
-[ModelingToolkit.jl]() is used for symbolic modeling of dynamical systems. It provides a high-performance, composable modeling framework for automatically parallelized scientific computing.
+[ModelingToolkit.jl](https://docs.sciml.ai/ModelingToolkit/stable/) is used for symbolic modeling of dynamical systems. It provides a high-performance, composable modeling framework for automatically parallelized scientific computing.
 
 - **Lux.jl**  
-[Lux.jl]() is employed for building neural networks. It offers a flexible and extensible deep learning framework with a focus on compatibility with scientific computing packages.
+[Lux.jl](https://lux.csail.mit.edu/stable/) is employed for building neural networks. It offers a flexible and extensible deep learning framework with a focus on compatibility with scientific computing packages.
 
 - **DataDrivenDiffEq.jl**  
-[DataDrivenDiffEq.jl]() is central to the data-driven modeling approach of this project. It provides tools for discovering governing equations from data, including implementation of Sparse Identification of Nonlinear Dynamics (SINDy) 
+[DataDrivenDiffEq.jl](https://docs.sciml.ai/DataDrivenDiffEq/stable/) is central to the data-driven modeling approach of this project. It provides tools for discovering governing equations from data, including implementation of Sparse Identification of Nonlinear Dynamics (SINDy) 
 
 - **DataDrivenSparse.jl**  
-[DataDrivenSparse.jl]() was used for sparse regression and feature selection for the models. It implements algorithms such as:
+[DataDrivenSparse.jl](https://docs.sciml.ai/DataDrivenDiffEq/stable/libs/datadrivensparse/sparse_regression/) was used for sparse regression and feature selection for the models. It implements algorithms such as:
     STLSQ
     ADAM
     SR3
 
 - **HyperTuning.jl**  
-[HyperTuning.jl]() was used to optimise the hyperparameters of the sparse regression algorithm which play a crucial part to obtain the optimal solution to the problem.
+[HyperTuning.jl](https://jmejia8.github.io/HyperTuning.jl/dev/) was used to optimise the hyperparameters of the sparse regression algorithm which play a crucial part to obtain the optimal solution to the problem.
 
 These libraries form the backbone of this data-driven modeling pipeline, enabling to discover and analyze complex dynamical systems from experimental data.
 
