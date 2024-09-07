@@ -20,25 +20,27 @@ gr()
 
 # Retrieve file arguments
 if length(ARGS) < 4
-    error("Error! You need to specify as arguments: \n- Type of input concentration (high/low)\n
+    error("Error! You need to specify as arguments: \n
         - Type of growth factor (EGF/NGF)\n
+        - Type of input concentration (high/low)\n
         - Pulse duration\n
         - Pulse frequency (Note: enter 100 for only one pulse)")
 else
-    println("Running UDE approximation of EGF/NGF model for:")
-    CC = lowercase(ARGS[1])
-    GF = lowercase(ARGS[2])
+    print("Running UDE approximation for ")
+    GF = uppercase(ARGS[1]) 
+    CC = lowercase(ARGS[2])
     pulse_duration = parse(Int, ARGS[3])
     pulse_frequency = parse(Int, ARGS[4])
 
     # Name output file to save the results according to parameters used
     if pulse_frequency < 100
-        println("$(uppercasefirst(CC)) concentration $(GF) with $(pulse_duration)' pulse every $(pulse_frequency)'")
+        println("$(GF) $(CC) concentration with $(pulse_duration)'/$(pulse_frequency)' pulses.")
         filename = string(GF, "_", CC, "CC_", pulse_duration, "m_", pulse_frequency, "v")
     else
-        println("$(CC) concentration $(GF) with a single pulse of $(pulse_duration)'")
+        println("$(GF) $(CC) concentration with a single pulse of $(pulse_duration)'.")
         filename = string(GF, "_", CC, "CC_", pulse_duration, "m")
     end
+    flush(stdout)
 end
 
 # Set the ODE parameters relative to specific case
@@ -244,6 +246,7 @@ callback = function (p, l)
     push!(losses, l)
     if length(losses) % 50 == 0
         println("Current loss after $(length(losses)) iterations: $(losses[end])")
+        flush(stdout)
     end
     return false
 end
@@ -267,7 +270,7 @@ println("Training loss after $(length(losses)) iterations: $(losses[end])")
 optprob2 = Optimization.OptimizationProblem(optf, res1.u)
 res2 = Optimization.solve(optprob2, OptimizationOptimJL.LBFGS(linesearch = LineSearches.BackTracking()), callback = callback, maxiters = 2000)
 println("Final training loss after $(length(losses)) iterations: $(losses[end])")
-
+flush(stdout)
 
 
 ##### Visualise results #####

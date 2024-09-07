@@ -20,19 +20,19 @@ gr()
 
 # Retrieve file arguments
 if length(ARGS) < 2
-    error("Error! You need to specify as arguments: \n-Input concentration\n-Type of NFB (no/a/b/ab)")
+    error("Error! You need to specify as arguments:\n
+        - Type of NFB (no/a/b/ab)\n
+        - Input concentration\n")
 else
-    println("")
-    input_CC = parse(Float64, ARGS[1])
-    
-    type_NFB = lowercase(ARGS[2])
-    println(type_NFB)
+    type_NFB = lowercase(ARGS[1])
+    input_CC = parse(Float64, ARGS[2])
+    println("Running UDE approximation for case $(type_NFB) with input concentration $(string(input_CC)).")
+    flush(stdout)
 end
 
 # Define which case (noFB, a, b, ab) to run the UDE approximation for
 string_CC = replace(string(input_CC), "." => "")
 filename = string("NFB_", type_NFB, "_", string_CC)
-println(filename)
 if occursin("no", type_NFB)
     x1=0
     x2=0
@@ -163,6 +163,7 @@ callback = function (p, l)
     push!(losses, l)
     if length(losses) % 50 == 0
         println("Current loss after $(length(losses)) iterations: $(losses[end])")
+        flush(stdout)
     end
     return false
 end
@@ -186,7 +187,7 @@ println("Training loss after $(length(losses)) iterations: $(losses[end])")
 optprob2 = Optimization.OptimizationProblem(optf, res1.u)
 res2 = Optimization.solve(optprob2, OptimizationOptimJL.LBFGS(linesearch = LineSearches.BackTracking()), callback = callback, maxiters = 2000)
 println("Final training loss after $(length(losses)) iterations: $(losses[end])")
-
+flush(stdout)
 
 
 ##### Visualise results #####
