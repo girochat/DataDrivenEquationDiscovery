@@ -36,9 +36,9 @@ end
 # ╔═╡ 9ebfadf0-b711-46c0-b5a2-9729f9e042ee
 md"""
 # Equation discovery with E-SINDy
-This notebook contains the code to implement a version of the E-SINDy algorithms inspired from "Discovering governing equations from data by sparse identification of nonlinear dynamical systems" by Brunton et al. (2016), [DOI](https://doi.org/10.1098/rspa.2021.0904). It was designed to estimate the algebraic formula of an unknown function. This function corresponds to unknown parts of an ODE system that were approximated by a neural network. Two different signalling pathways, and corresponding ODE systems, were considered that generated the data used in this notebook:
+This notebook contains the code to implement a version of the E-SINDy algorithms inspired from "Discovering governing equations from data by sparse identification of nonlinear dynamical systems" by Brunton et al. (2016), [DOI](https://doi.org/10.1098/rspa.2021.0904). It was designed to estimate the algebraic formula of an unknown function. In this work, the function corresponds to unknown parts of an ODE system that were approximated by a neural network. Two different signalling pathways, and corresponding ODE systems, were considered that generated the data used in this notebook:
 - Simple Negative Feedback Loop model (NFB) of two phosphatases g1p and g2p (Chapter 12: Parameter Estimation, Sloppiness, and Model Identifiability in "Quantitative Biology: Theory, Computational Methods and Examples of Models" by D. Daniels, M. Dobrzyński, D. Fey (2018)).
-- ERK activation dynamics model (ERK) as described in "Frequency modulation of ERK activation dynamics rewires cell fate" by H. Ryu et al. (2015).
+- ERK activation dynamics model (ERK) as described in "Frequency modulation of ERK activation dynamics rewires cell fate" by H. Ryu et al. (2015) [DOI](https://doi.org/10.15252/msb.20156458) .
 """
 
 # ╔═╡ 6024651c-85f6-4e53-be0f-44f658cf9c77
@@ -282,6 +282,7 @@ begin
 	# Define a basis of functions to estimate the unknown equation of GFs model
 	erk_h = DataDrivenDiffEq.polynomial_basis(x[1:2], 2)
 	erk_basis = DataDrivenDiffEq.Basis([erk_h; erk_h .* i], x[1:2], implicits=i[1:1])
+	
 end
 
 # ╔═╡ 219b794d-9f51-441b-9197-b8ef0c4495b4
@@ -456,40 +457,24 @@ function compute_coef_stat(bootstrap_res, coef_threshold)
 
 	# Compute the mean and std of ensemble coefficients
 	m = zeros(Float64, n_eqs, n_terms)
-	low_interql = zeros(Float64, n_eqs, n_terms)
-	up_interql = zeros(Float64, n_eqs, n_terms)
-
-	#mu = zeros(Float64, n_eqs, n_terms)
-	#sem = zeros(Float64, n_eqs, n_terms)
-	
-	#sem = zeros(Float64, n_eqs, n_terms)
+	q_low = zeros(Float64, n_eqs, n_terms)
+	q_up= zeros(Float64, n_eqs, n_terms)
 	for i in 1:n_eqs
 		for j in 1:n_terms
 			current_coef = filter(!iszero, masked_res[:,i,j])
 			if !isempty(current_coef)
 				m[i,j] = median(current_coef) 
-				low_interql[i,j] = percentile(current_coef, 5)
-				up_interql[i,j] = percentile(current_coef, 95)
+				q_low[i,j] = percentile(current_coef, 5)
+				q_up[i,j] = percentile(current_coef, 95)
 			end
-			#mu[i,j] = mean(filter(!iszero, masked_res[:,i,j]))
-			
-			#sem[i,j] = std(filter(!iszero, masked_res[:,i,j]))
-			#if !isnan(mu[i,j]) && sem[i,j] == 0
-				#sem[i,j] = 1e-6
-			#else
-				#sem[i,j] = sem_i #/ sqrt(sample_size)
-			#end
 		end
 	end
-	#mu[isnan.(mu)] .= 0
-	#sem[isnan.(sem)] .= 0
-
-	return (median=m, p_5=low_interql, p_95=up_interql)#, mean=mu, SEM=sem)
+	return (median=m, q_low=q_low, q_up=q_up)
 end
 
 # ╔═╡ 97ae69f0-764a-4aff-88cd-91accf6bb3fd
 # Function to build callable function out of symbolic equations
-function build_equations(coef, basis, verbose=true)
+function build_equations(coef, basis; verbose=true)
 
 	# Build equation
 	h = [equation.rhs for equation in DataDrivenDiffEq.equations(basis)]
@@ -514,29 +499,28 @@ function build_equations(coef, basis, verbose=true)
 end
 
 # ╔═╡ 74066f54-6e50-4db0-a98f-dc1eb9999899
+# Function to compute the equations output (y) given the input (x) 
 function get_yvals(data, equations)
 	n_eqs = length(equations)
 
 	yvals = []
 	for eq in equations
-		push!(yvals, [eq(x) for x in eachrow([data.X ngf_data.Y])])
+		push!(yvals, [eq(x) for x in eachrow([data.X data.Y])])
 	end
 	return yvals
 end
 
 # ╔═╡ d7e68526-5ba9-41ed-9669-e7a289db1e93
-# Fucntion to compute the confidence interval of the estimated equation
-function compute_CI(data, coef_low, coef_up, basis, confidence)
+# Fucntion to compute the interquartile range of the estimated equation
+function compute_CI(data, coef_low, coef_up, basis)
 
-	# Build normal distribution for non-zero coefficients
-	indices = findall(!iszero, coef_up)
-	#coef_distrib = [Normal(mean_coef[k], sem_coef[k]) for k in indices]
+	# Build uniform distribution for non-zero coefficients
+	indices = findall(!iszero, coef_up .- coef_low)
 	coef_distrib = [Uniform(coef_low[k], coef_up[k]) for k in indices]
 
 	# Run MC simulations to estimate the distribution of estimated equations 
 	n_simulations = 1000
 	results = zeros(n_simulations, size(data.Y, 1), size(data.Y, 2))
-	#current_coef = zeros(size(mean_coef))
 	current_coef = zeros(size(coef_up))
     for i in 1:n_simulations
 		
@@ -545,33 +529,29 @@ function compute_CI(data, coef_low, coef_up, basis, confidence)
 		current_coef[indices] = sample
 
 		# Calculate function value given sample of coef.
-		current_y = build_equations(current_coef, basis, false)
-		n_eqs = length(current_y)
+		current_eqs = build_equations(current_coef, basis, verbose=false)
+		yvals = get_yvals(data, current_eqs)
+		n_eqs = length(current_eqs)
 		for eq in 1:n_eqs
-			results[i,:,eq] = [current_y[eq](x) for x in eachrow([data.X data.Y])]
+			results[i,:,eq] = yvals[eq]
 		end
 	end
-	
-	if confidence > 1
-		confidence = confidence / 100
-	end
-	
-    # Calculate confidence interval
-    lower_percentile = (1 - confidence) / 2
-    upper_percentile = 1 - lower_percentile
-    ci = mapslices(row -> quantile(row, [lower_percentile, upper_percentile]),
-		results, dims=1)
 
-    return (ci_low=ci[1,:,:], ci_up=ci[2,:,:])
+	iqr_low = mapslices(row -> minimum(row), results, dims=1)
+	iqr_up = mapslices(row -> maximum(row), results, dims=1)
+
+    return (iqr_low=iqr_low[1,:,:], iqr_up=iqr_up[1,:,:])
 end
 
 # ╔═╡ cc2395cc-00df-4e5e-8573-e85ce813fd41
 # Plotting function for E-SINDy results
-function plot_esindy(results; sample_ids=nothing, confidence=0)
+function plot_esindy(results; sample_ids=nothing, iqr=true)
 
 	# Retrieve results
-	data, basis, coef_median, coef_low, coef_up = results.data, results.basis, results.coef_median, results.coef_low, results.coef_up
-	y = build_equations(coef_median, basis)
+	data, basis = results.data, results.basis
+	coef_median, coef_low, coef_up = results.coef_median, results.coef_low, results.coef_up
+	eqs = build_equations(coef_median, basis, verbose=false)
+	y_vals = get_yvals(data, eqs)
 
 	# Retrieve the number of samples
 	n_samples = sum(data.time .== 0)
@@ -582,12 +562,12 @@ function plot_esindy(results; sample_ids=nothing, confidence=0)
 	
 	# Compute confidence interval if necessary
 	ci_low, ci_up = nothing, nothing
-	if confidence > 0
-		ci_low, ci_up = compute_CI(data, coef_low, coef_up, basis, confidence)
+	if iqr
+		ci_low, ci_up = compute_CI(data, coef_low, coef_up, basis)
 	end
 	
 	# Plot results
-	n_eqs = size(y, 1)
+	n_eqs = size(eqs, 1)
 	subplots = []
 	palette = colorschemes[:seaborn_colorblind] # [:vik10]
 	for eq in 1:n_eqs
@@ -604,16 +584,12 @@ function plot_esindy(results; sample_ids=nothing, confidence=0)
 				i_end = i_start + size_sample - 1
 				i_color = ceil(Int, 1 + sample * (length(palette) / n_samples))
 
-				y_vals =  [y[eq](x) for x in eachrow([data.X[i_start:i_end,:] data.Y[i_start:i_end]])] 
-				if length(y_vals) == 1
-					y_vals = repeat([y_vals], size_sample)
-				end
-
-				if confidence > 0
-					plot!(p, data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color],
-					ribbon=(y_vals-ci_low[i_start:i_end, eq], ci_up[i_start:i_end, eq]-y_vals), fillalpha=0.15)
+				y = y_vals[eq][i_start:i_end] 
+				if iqr
+					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], color=palette[i_color],
+					ribbon=(y - ci_low[i_start:i_end, eq], ci_up[i_start:i_end, eq] - y), fillalpha=0.15)
 				else
-					plot!(p, data.time[i_start:i_end], y_vals, label=data.labels[sample+1], color=palette[i_color])
+					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], color=palette[i_color])
 				end
 				
 				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end, eq], label="", linestyle=:dash, color=palette[i_color])
@@ -633,13 +609,13 @@ function esindy(data, basis, n_bstrap=100; coef_threshold=15, data_fraction=1)
 	bootstrap_res, hyperparameters = sindy_bootstrap(data, basis, n_bstrap, data_fraction)
 
 	# Compute the mean and std of ensemble coefficients
-	e_coef, low_b, up_b = compute_coef_stat(bootstrap_res, coef_threshold)
+	e_coef, low_coef, up_coef = compute_coef_stat(bootstrap_res, coef_threshold)
 
 	# Build the final equation as callable functions
 	println("E-SINDy estimated equations:")
 	y = build_equations(e_coef, basis)
 	
-	return (data=data, basis=basis, bootstraps=bootstrap_res, coef_median=e_coef, coef_low=low_b, coef_up=up_b, hyperparameters=hyperparameters)
+	return (data=data, basis=basis, bootstraps=bootstrap_res, coef_median=e_coef, coef_low=low_coef, coef_up=up_coef, hyperparameters=hyperparameters)
 end
 
 # ╔═╡ 569c7600-246b-4a64-bba5-1e74a5888d8c
@@ -669,16 +645,12 @@ md"""
 """
 
 # ╔═╡ 04538fbf-63b7-4394-b281-f047d0c3ea51
+#jldsave("./Data/ngf_esindy_100bt.jld2"; results=ngf_res)
+
+# ╔═╡ 62d79e8d-6d82-4fea-a596-8c32dd16d78e
 begin
-	#jldsave("./Data/ngf_esindy_100bt.jld2"; results=ngf_res)
 	#print_jld_key("./Data/ngf_esindy_1000bt_hp.jld2")
 	ngf_res = load("./Data/ngf_esindy_100bt.jld2")["results"]
-end
-
-# ╔═╡ 60228ff7-59ba-458c-9cf5-1c105c0d2ba9
-begin
-	m, low_b, up_b = compute_coef_stat(ngf_res.bootstraps, 20)
-	
 end
 
 # ╔═╡ 3bd630ad-f546-4b0b-8f3e-98367de739b1
@@ -688,10 +660,12 @@ md"""
 
 # ╔═╡ de4c57fe-1a29-4354-a5fe-f4e184de4dd3
 begin
-	ngf_plot = plot_esindy(ngf_res_up, confidence=95)[1]
+	ngf_plot = plot_esindy(ngf_res)[1]
 	plot(ngf_plot, title="E-SINDy results for ERK model\nafter NGF stimulation\n", size=(800, 600), legend_position=:topright)
-	#savefig("./Plots/ngf_esindy_100bt.svg")
 end
+
+# ╔═╡ 7ec5881f-abfd-4c35-af42-2fdf968a7d6f
+#savefig("./Plots/ngf_esindy_100bt.svg")
 
 # ╔═╡ 03993d5c-7900-454a-9fe3-a70bd69456d1
 md"""
@@ -720,10 +694,12 @@ end
 
 # ╔═╡ 664b3e67-09d3-4e98-a946-ffbcbed0fe90
 begin
-	#egf_plot = plot_esindy(egf_res, confidence=0)[1]
-	#plot(egf_plot, title="E-SINDy results for ERK model\nafter EGF stimulation\n", size=(800, 600), legend_position=:topright, ylim=(-0.05, .1))
-	#savefig("./Plots/egf_esindy_100bt.svg")
+	egf_plot = plot_esindy(egf_res)[1]
+	plot(egf_plot, title="E-SINDy results for ERK model\nafter EGF stimulation\n", size=(800, 600), legend_position=:topright, ylim=(-0.05, .1))
 end
+
+# ╔═╡ c182982b-6f5a-41fe-a708-9e7786e090a5
+#savefig("./Plots/egf_esindy_100bt.svg")
 
 # ╔═╡ d0e65b25-0ea7-46c1-ac15-99eea43b6ade
 md"""
@@ -762,10 +738,9 @@ md"""
 # ╔═╡ 20869d4b-ccd5-479a-b0d9-3271bef9921d
 begin
 	# Plot the results
-	a_plots = plot_esindy(a_res, sample_ids=1:9, confidence=95)
+	a_plots = plot_esindy(a_res, sample_ids=1:9)
 	a_plot2 = plot(a_plots[2], ylim=(0, 2))
 	plot(a_plots[1], a_plot2, layout=(2,1), size=(800, 800), plot_title="E-SINDy results for NFB on g1p")
-	
 end
 
 # ╔═╡ f9f4822e-e5cc-4c15-9131-30c8ec2e0b83
@@ -782,7 +757,7 @@ md"""
 """
 
 # ╔═╡ 973f831a-4050-4c34-a868-091f335bcbb4
-b_res = esindy(b_data, nfb_basis, 100, coef_threshold=99, data_fraction=0.3)
+#b_res = esindy(b_data, nfb_basis, 100, coef_threshold=99, data_fraction=0.3)
 
 # ╔═╡ 6d20c14d-7fed-4812-a677-d7d85fdbe725
 md"""
@@ -793,7 +768,7 @@ md"""
 #jldsave("./Data/nfb_esindy_100bt_b.jld2"; results=b_res)
 
 # ╔═╡ 99c86351-4a05-45cb-b842-7b7c2d37a7e1
-#b_res = load("./Data/nfb_esindy_100bt_b.jld2")["results"]
+b_res = load("./Data/nfb_esindy_100bt_b.jld2")["results"]
 
 # ╔═╡ 18d05848-5789-414d-ab88-439c60959899
 md"""
@@ -803,7 +778,7 @@ md"""
 # ╔═╡ 34c1f8fd-27de-4d89-a4f4-c8fbf62c54f6
 begin
 	# Plot the results
-	b_plots = plot_esindy(b_res, sample_ids=1:9, confidence=95)
+	b_plots = plot_esindy(b_res, sample_ids=1:9)
 	b_plot1 = plot(b_plots[1], ylim=(0, 2))
 	plot(b_plot1, b_plots[2], layout=(2,1), size=(800, 800), plot_title="E-SINDy results for NFB on g2p")
 end
@@ -843,7 +818,7 @@ md"""
 # ╔═╡ e8c5545d-9988-42f9-bf2c-bbd0199f7655
 begin
 	# Plot the results
-	ab_plots = plot_esindy(ab_res, confidence=95)
+	ab_plots = plot_esindy(ab_res)
 	plot(ab_plots[1], ab_plots[2], layout=(2,1), size=(800, 800), plot_title="E-SINDy results for NFB on g1p and g2p")
 end
 
@@ -882,7 +857,7 @@ md"""
 # ╔═╡ 249d11db-7af2-48f8-bc04-961b52816d4a
 begin
 	# Plot the results
-	nofb_plots = plot_esindy(nofb_res, confidence=95)
+	nofb_plots = plot_esindy(nofb_res)
 	plot(nofb_plots[1], nofb_plots[2], ylim=(0, 2), layout=(2,1), size=(800, 800), plot_title="E-SINDy results with no FB")
 end
 
@@ -905,15 +880,6 @@ function print_jld_key(filename)
 	close(file)
 end
 
-# ╔═╡ 7507f422-d879-474a-a1ef-5f376f936d7f
-function safe_access(arr, i)
-    try
-        return arr[i]
-    catch
-        return nothing
-    end
-end
-
 # ╔═╡ Cell order:
 # ╟─9ebfadf0-b711-46c0-b5a2-9729f9e042ee
 # ╟─6024651c-85f6-4e53-be0f-44f658cf9c77
@@ -925,10 +891,10 @@ end
 # ╟─666a20eb-8395-4859-ae70-aa8ea22c5c77
 # ╟─f21876f0-3124-40ad-ad53-3a53efe77040
 # ╟─fd914104-90da-469c-a80f-f068cac51a1c
-# ╠═af06c850-2e8b-4b4b-9d0f-02e645a79743
+# ╟─af06c850-2e8b-4b4b-9d0f-02e645a79743
 # ╟─19225f7f-257d-4857-a709-6eb623985ba4
-# ╠═129f37f3-2399-44ec-9d01-fca76015f755
-# ╠═70cf3834-18d3-4732-837c-5af620c5f005
+# ╟─129f37f3-2399-44ec-9d01-fca76015f755
+# ╟─70cf3834-18d3-4732-837c-5af620c5f005
 # ╟─b549bff5-d8e9-4f41-96d6-2d562584ccd9
 # ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
 # ╟─447a8dec-ae5c-4ffa-b672-4f829c23eb1f
@@ -937,36 +903,38 @@ end
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
 # ╟─ede9d54f-aaa4-4ff3-9519-14e8d32bc17f
-# ╟─e81310b5-63e1-45b8-ba4f-81751d0fcc06
+# ╠═e81310b5-63e1-45b8-ba4f-81751d0fcc06
 # ╟─219b794d-9f51-441b-9197-b8ef0c4495b4
 # ╟─4646bfce-f8cc-4d24-b461-753daff50f71
 # ╟─034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╟─0f7076ef-848b-4b3c-b918-efb6419787be
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
-# ╟─c7e825a3-8ce6-48fc-86ac-21810d32bbfb
+# ╠═c7e825a3-8ce6-48fc-86ac-21810d32bbfb
 # ╟─79b03041-01e6-4d8e-b900-446511c81058
-# ╠═74b2ade4-884b-479d-9fee-828d37d7ab47
+# ╟─74b2ade4-884b-479d-9fee-828d37d7ab47
 # ╟─97ae69f0-764a-4aff-88cd-91accf6bb3fd
 # ╟─74066f54-6e50-4db0-a98f-dc1eb9999899
 # ╟─d7e68526-5ba9-41ed-9669-e7a289db1e93
-# ╠═cc2395cc-00df-4e5e-8573-e85ce813fd41
+# ╟─cc2395cc-00df-4e5e-8573-e85ce813fd41
 # ╟─012a5186-03aa-482d-bb62-ecba49587877
 # ╟─569c7600-246b-4a64-bba5-1e74a5888d8c
 # ╟─e49b5f76-d04b-4b19-a4c8-a3a3a1b40f1b
 # ╟─1f3f1461-09f1-4825-bb99-4064e075e23e
-# ╠═b73f3450-acfd-4b9e-9b7f-0f7289a62976
-# ╠═60228ff7-59ba-458c-9cf5-1c105c0d2ba9
-# ╠═4a30e321-807c-43ca-a5f3-198ae8d42435
+# ╟─b73f3450-acfd-4b9e-9b7f-0f7289a62976
+# ╟─4a30e321-807c-43ca-a5f3-198ae8d42435
 # ╟─02c625dc-9d21-488e-983b-c3e2c40e0aad
-# ╠═04538fbf-63b7-4394-b281-f047d0c3ea51
+# ╟─04538fbf-63b7-4394-b281-f047d0c3ea51
+# ╟─62d79e8d-6d82-4fea-a596-8c32dd16d78e
 # ╟─3bd630ad-f546-4b0b-8f3e-98367de739b1
-# ╠═de4c57fe-1a29-4354-a5fe-f4e184de4dd3
+# ╟─de4c57fe-1a29-4354-a5fe-f4e184de4dd3
+# ╟─7ec5881f-abfd-4c35-af42-2fdf968a7d6f
 # ╟─03993d5c-7900-454a-9fe3-a70bd69456d1
 # ╟─e675346b-99dc-441f-913b-19387aaef3ea
 # ╟─50d20cc1-ce44-43b6-9d72-1ff36137f6f8
 # ╟─8f7e784d-1f35-49bf-ba73-d2306453e258
 # ╟─65732e07-69dd-43d5-b04c-72444c78c470
 # ╟─664b3e67-09d3-4e98-a946-ffbcbed0fe90
+# ╟─c182982b-6f5a-41fe-a708-9e7786e090a5
 # ╟─d0e65b25-0ea7-46c1-ac15-99eea43b6ade
 # ╟─77c1d355-8a7e-414e-9e0e-8eda1fbbbf1d
 # ╟─5e692d14-c785-4f8c-9e9a-f581c56e1bc8
@@ -976,13 +944,13 @@ end
 # ╟─fa126d0c-868c-4083-b401-02504c033605
 # ╟─dd11964a-1693-47d5-830f-3c4c632efe83
 # ╟─20869d4b-ccd5-479a-b0d9-3271bef9921d
-# ╠═f9f4822e-e5cc-4c15-9131-30c8ec2e0b83
+# ╟─f9f4822e-e5cc-4c15-9131-30c8ec2e0b83
 # ╟─6d7969d7-5753-4f4e-bace-7de3a542103e
 # ╟─a692aaa9-3b35-44cf-9293-ae0e2faf1eeb
 # ╟─973f831a-4050-4c34-a868-091f335bcbb4
 # ╟─6d20c14d-7fed-4812-a677-d7d85fdbe725
 # ╟─d34550ae-57fb-44b9-bd0f-e03fdf47b058
-# ╠═99c86351-4a05-45cb-b842-7b7c2d37a7e1
+# ╟─99c86351-4a05-45cb-b842-7b7c2d37a7e1
 # ╟─18d05848-5789-414d-ab88-439c60959899
 # ╟─34c1f8fd-27de-4d89-a4f4-c8fbf62c54f6
 # ╟─bcd1baf8-548c-4798-806e-67a92238be07
@@ -1003,7 +971,6 @@ end
 # ╟─7fdae884-4a02-4f61-8b53-616e14bef473
 # ╟─a46a7ac1-4b0c-45cf-a191-240bc4796b20
 # ╟─249d11db-7af2-48f8-bc04-961b52816d4a
-# ╟─f6354d11-84ae-459a-807a-7d759d7c07f7
+# ╠═f6354d11-84ae-459a-807a-7d759d7c07f7
 # ╟─c7808cd2-5b58-4eb6-88fe-0a7fbb66717d
 # ╟─9662aac5-d773-4508-a643-813130f53e5b
-# ╟─7507f422-d879-474a-a1ef-5f376f936d7f
