@@ -32,7 +32,7 @@ end
 
 # Define which case (noFB, a, b, ab) to run the UDE approximation for
 string_CC = replace(string(input_CC), "." => "")
-filename = string("NFB_", type_NFB, "_", string_CC)
+filename = string("NFB_", type_NFB, "_", string_CC, "_relu_16d")
 if occursin("no", type_NFB)
     x1=0
     x2=0
@@ -46,6 +46,7 @@ elseif type_NFB == "ab"
     x1=1
     x2=1
 end
+
 
 
 
@@ -105,7 +106,7 @@ xₙ_g2p = abs.(x_g2p .+ (noise_magnitude * x̄_g2p) .* randn(rng, eltype(x_g2p)
 
 # Define a Multilayer FeedForward with Lux.jl
 rbf(x) = exp.(-(x .^ 2))
-const U = Lux.Chain(Lux.Dense(3, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 2))
+const U = Lux.Chain(Lux.Dense(3, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 2, relu))
 
 # Get the initial parameters and state variables of the model
 p, st = Lux.setup(rng, U)
@@ -185,7 +186,7 @@ println("Training loss after $(length(losses)) iterations: $(losses[end])")
 
 # Finish solving UDE by running LBFGS optimizer
 optprob2 = Optimization.OptimizationProblem(optf, res1.u)
-res2 = Optimization.solve(optprob2, OptimizationOptimJL.LBFGS(linesearch = LineSearches.BackTracking()), callback = callback, maxiters = 2000)
+res2 = Optimization.solve(optprob2, OptimizationOptimJL.LBFGS(linesearch = LineSearches.BackTracking()), callback = callback, maxiters = 5000)
 println("Final training loss after $(length(losses)) iterations: $(losses[end])")
 flush(stdout)
 
