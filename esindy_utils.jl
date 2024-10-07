@@ -458,50 +458,48 @@ module ESINDyModule
 
 
 
-    # Fucntion to compute the confidence interval of the estimated equation
-    function compute_CI(data, mean_coef, sem_coef, basis, confidence)
+    # Function to compute the interquartile range of the estimated equation
+    function compute_CI(data, coef_low, coef_up, basis)
     
-    	# Build normal distribution for non-zero coefficients
-    	indices = findall(!iszero, mean_coef)
-    	coef_distrib = [Normal(mean_coef[k], sem_coef[k]) for k in indices]
+    	# Build uniform distribution for non-zero coefficients
+    	indices = findall(!iszero, coef_up .- coef_low)
+    	coef_distrib = [Uniform(coef_low[k], coef_up[k]) for k in indices]
     
-    	# Run MC simulations to estimate the distribution of estimated equation 
+    	# Run MC simulations to estimate the distribution of estimated equations 
     	n_simulations = 1000
-    	results = zeros(n_simulations, size(data.time, 1))
-    	current_coef = zeros(size(mean_coef))
+    	results = zeros(n_simulations, size(data.Y, 1), size(data.Y, 2))
+    	current_coef = zeros(size(coef_up))
         for i in 1:n_simulations
+    		
+    		# Samples coefficient from the distribution
     		sample = [rand(distrib) for distrib in coef_distrib]
     		current_coef[indices] = sample
-    		current_y = build_equations(current_coef, basis, false)
-    		current_y_vals = [current_y[1](x) for x in eachrow([data.X data.Y])]
-    	
-            # Calculate function value
-            results[i, :] = current_y_vals
-    	end
-    	
-    	if confidence > 1
-    		confidence = confidence / 100
-    	end
-    	
-        # Calculate confidence interval
-        lower_percentile = (1 - confidence) / 2
-        upper_percentile = 1 - lower_percentile
-        ci = mapslices(row -> quantile(row, [lower_percentile, upper_percentile]),
-    		results, dims=1)
     
-        return (ci_low=ci[1,:], ci_up=ci[2,:])
+    		# Calculate function value given sample of coef.
+    		current_eqs = build_equations(current_coef, basis, verbose=false)
+    		yvals = get_yvals(data, current_eqs)
+    		n_eqs = length(current_eqs)
+    		for eq in 1:n_eqs
+    			results[i,:,eq] = yvals[eq]
+    		end
+    	end
+    
+    	iqr_low = mapslices(row -> minimum(row), results, dims=1)
+    	iqr_up = mapslices(row -> maximum(row), results, dims=1)
+    
+        return (iqr_low=iqr_low[1,:,:], iqr_up=iqr_up[1,:,:])
     end
 
 
 
     # Plotting function for E-SINDy results
-    function plot_esindy(results; sample_ids=nothing, confidence=0)
+    function plot_esindy(results; sample_idxs=nothing, confidence=0)
     
     	# Retrieve the number of samples
     	data, basis, y = results.data, results.basis, results.equations
     	n_samples = sum(data.time .== 0)
-    	if isnothing(sample_ids)
-    		sample_ids = 1:n_samples
+    	if isnothing(sample_idxs)
+    		sample_idxs = 1:n_samples
     	end
     	size_sample = Int(length(data.time) / n_samples)
     
@@ -524,7 +522,7 @@ module ESINDyModule
     
     		# Plot each sample separately
     		for sample in 0:(n_samples-1)
-    			if sample in sample_ids
+    			if sample in sample_idxs
     				
     				i_start = 1 + sample * size_sample
     				i_end = i_start + size_sample - 1
