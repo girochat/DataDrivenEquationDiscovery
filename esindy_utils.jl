@@ -493,58 +493,54 @@ module ESINDyModule
 
 
     # Plotting function for E-SINDy results
-    function plot_esindy(results; sample_idxs=nothing, confidence=0)
+    function plot_esindy(results; sample_idxs=nothing, iqr=true)
+    
+    	# Retrieve results
+    	data, basis = results.data, results.basis
+    	coef_median, coef_low, coef_up = results.coef_median, results.coef_low, results.coef_up
+    	eqs = build_equations(coef_median, basis, verbose=false)
+    	y_vals = get_yvals(data, eqs)
     
     	# Retrieve the number of samples
-    	data, basis, y = results.data, results.basis, results.equations
     	n_samples = sum(data.time .== 0)
+    	size_sample = Int(length(data.time) / n_samples)
     	if isnothing(sample_idxs)
     		sample_idxs = 1:n_samples
     	end
-    	size_sample = Int(length(data.time) / n_samples)
-    
+    	
     	# Compute confidence interval if necessary
-    	if confidence > 0
-    		ci_low, ci_up = compute_CI(data, results.mean_coef, results.sem_coef, basis, confidence)
+    	ci_low, ci_up = nothing, nothing
+    	if iqr
+    		ci_low, ci_up = compute_CI(data, coef_low, coef_up, basis)
     	end
     	
     	# Plot results
-    	n_eqs = size(y, 1)
+    	n_eqs = size(eqs, 1)
     	subplots = []
-    	palette = colorschemes[:seaborn_colorblind] # [:vik10]
-    	for i in 1:n_eqs
-    		
+    	palette = colorschemes[:seaborn_colorblind]
+    	for eq in 1:n_eqs
     		if n_eqs > 1
-    			p = plot(title="Equation $(i)", xlabel="Time", ylabel="Model species y(t)")
+    			p = plot(title="Equation $(eq)", xlabel="Time t", ylabel="Equation y(t)")
     		else
-    			p = plot(title="", xlabel="Time", ylabel="Model species y(t)")
+    			p = plot(title="", xlabel="Time", ylabel="Equation y(t)")
     		end
     
     		# Plot each sample separately
     		for sample in 0:(n_samples-1)
-    			if sample in sample_idxs
-    				
+    			if (sample+1) in sample_idxs
     				i_start = 1 + sample * size_sample
     				i_end = i_start + size_sample - 1
     				i_color = ceil(Int, 1 + sample * (length(palette) / n_samples))
-                    				
-    				y_vals = [y[i](x) for x in eachrow([data.X[i_start:i_end,:] data.Y[i_start:i_end]])] 
-    				if length(y_vals) == 1
-    					y_vals = repeat([y_vals], size_sample)
-    				end
-    
-    				if confidence > 0
-    					plot!(p, data.time[i_start:i_end], y_vals, label=data.labels[sample+1], 
-                            color=palette[i_color],
-                            ribbon=(y_vals-ci_low[i_start:i_end], ci_up[i_start:i_end]-y_vals), 
-                            fillalpha=0.15)
+    				
+    				y = y_vals[eq][i_start:i_end] 
+    				if iqr
+    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], color=palette[i_color],
+    					ribbon=(y - ci_low[i_start:i_end, eq], ci_up[i_start:i_end, eq] - y), fillalpha=0.15)
     				else
-    					plot!(p, data.time[i_start:i_end], y_vals, label=data.labels[sample+1],
-                            color=palette[i_color])
+    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], color=palette[i_color])
     				end
     				
-    				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end], label="", linestyle=:dash, 
-                        color=palette[i_color])
+    				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end, eq], label="", linestyle=:dash, color=palette[i_color])
     			end
     		end
     		plot!(p, [], [],  label="GT", color=:black, linestyle=:dash)
@@ -553,7 +549,6 @@ module ESINDyModule
     	return subplots
     end
     
-    
     # Complete E-SINDy function 
     function esindy(data, basis, n_bstrap=100; coef_threshold=15, data_fraction=1)
     
@@ -561,7 +556,7 @@ module ESINDyModule
     	bootstrap_res, hyperparameters = sindy_bootstrap(data, basis, n_bstrap, data_fraction)
     
     	# Compute the mean and std of ensemble coefficients
-    	e_coef, coef_sem = compute_coef_stat(bootstrap_res, coef_threshold)
+    	e_coef, low_coef, up_coef = compute_coef_stat(bootstrap_res, coef_threshold)
     
     	# Build the final equation as callable functions
     	println("E-SINDy estimated equations:")
@@ -572,7 +567,8 @@ module ESINDyModule
             equations=y, 
             bootstraps=bootstrap_res, 
             coef_mean=e_coef, 
-            coef_sem=coef_sem,
+            coef_low=low_coef, 
+            coef_up=up_coef,
             hyperparameters=hyperparameters)
     end
 end
