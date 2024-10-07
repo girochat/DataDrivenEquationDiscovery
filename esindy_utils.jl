@@ -335,52 +335,61 @@ module ESINDyModule
 
 
     # Bootstrapping function that estimate optimal library terms given data
-    function library_bootstrap(data, basis, n_bstraps, n_libterms)
+    function library_bootstrap(data, basis, n_bstraps, n_libterms; implicit_id=none)
     
     	# Initialise the coefficient array
     	n_eqs = size(data.Y, 2)
     	l_basis = length(basis)
     	bootstrap_coef = zeros(n_bstraps, n_eqs, l_basis)
+    	indices = [1]
+    	best_bic = 1000
     
-    	print_flush("Starting E-SINDy Library Bootstrapping:")
-    	for j in 1:n_bstraps
-   	   	
-            if j % 10 == 0
-    		    print_flush("Bootstrap $(j)/$(n_bstraps)")
-    		end
+    	@info "Library E-SINDy Bootstrapping:"
+    	@progress name="Bootstrapping" threshold=0.01 for j in 1:n_bstraps
+    		for eq in 1:n_eqs		
     		
-    		# Define data driven problem with bootstrapped data
-    		rand_ind = sample(1:l_basis, n_libterms, replace=false)
-    		
-    		# Check if the problem involves implicits
-    		implicits = implicit_variables(basis)
-    		with_implicits = false
-    		if !isempty(implicits)
-    			with_implicits = true
-    			bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], x[1:size(data.X, 2)], implicits=i[1:1])
-    		else
-    			bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], x[1:size(data.X, 2)])
-    		end
+    			# Check if the problem involves implicits
+    			implicits = implicit_variables(basis)
+    			with_implicits = false
     
-    		# Solve problem with optimal hyperparameters
-    		dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(data.X', data.Y')
-    		best_λ, best_ν = get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
-    		if with_implicits
-    			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis,
-                ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), 
-                options=options)
-    		else
-    			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, 
-                DataDrivenSparse.SR3(best_λ, best_ν), 
-                options = options) 			
+    			# Create bootstrap library basis
+    			if !isempty(implicits)
+    				with_implicits = true
+    				idxs = [1:(implicit_id-1); (implicit_id+1):l_basis]
+    				rand_ind = [sample(idxs, n_libterms, replace=false); implicit_id]
+    				bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], x[1:size(data.X, 2)], implicits=i[1:1])
+    			else
+    				rand_ind = sample(1:l_basis, n_libterms, replace=false)
+    				bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], x[1:size(data.X, 2)])
+    			end
+    	
+    			# Solve data-driven problem with optimal hyperparameters
+    			dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(data.X', data.Y[:,eq]')
+    			best_λ, best_ν = 0.6, 0.001# get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
+    			if with_implicits
+    				best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, 
+                    ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
+    			else
+        			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options)
+    			end
     
+    			# Check if bootstrap basis is optimal
+    			bt_bic = bic(best_res)
+    			if bt_bic < best_bic
+    				best_bic = bt_bic
+    				bootstrap_coef[indices,eq,:] = zeros(length(indices),1,l_basis)
+    				bootstrap_coef[j,eq,rand_ind] = best_res.out[1].coefficients
+    				empty!(indices)
+    				push!(indices, j)
+    			elseif bt_bic == best_bic
+    				bootstrap_coef[j,eq,rand_ind] = best_res.out[1].coefficients
+    			end
     		end
-    		bootstrap_coef[j,:,rand_ind] = best_res.out[1].coefficients
-    		
     	end
     	return bootstrap_coef 
     end
-    
+
+
     
     # Function to estimate coefficient statistics (mean, std)
     function compute_coef_stat(bootstrap_res, coef_threshold)
@@ -399,23 +408,19 @@ module ESINDyModule
     
     	# Compute the mean and std of ensemble coefficients
     	m = zeros(Float64, n_eqs, n_terms)
-    	sem = ones(Float64, n_eqs, n_terms)
+    	q_low = zeros(Float64, n_eqs, n_terms)
+    	q_up= zeros(Float64, n_eqs, n_terms)
     	for i in 1:n_eqs
     		for j in 1:n_terms
-    			m[i,j] = mean(filter(!iszero, masked_res[:,i,j]))
-    			
-    			sem_i = std(masked_res[:,i,j])
-    			if !isnan(m[i,j]) && sem_i == 0
-    				sem[i,j] = 1e-6
-    			else
-    				sem[i,j] = sem_i / sqrt(sample_size)
+    			current_coef = filter(!iszero, masked_res[:,i,j])
+    			if !isempty(current_coef)
+    				m[i,j] = median(current_coef) 
+    				q_low[i,j] = percentile(current_coef, 5)
+    				q_up[i,j] = percentile(current_coef, 95)
     			end
     		end
     	end
-    	m[isnan.(m)] .= 0
-    	sem[isnan.(sem)] .= 0
-    
-    	return (mean = m, SEM = sem)
+    	return (median=m, q_low=q_low, q_up=q_up)
     end
     
     
@@ -445,7 +450,8 @@ module ESINDyModule
     end
     
 
-
+    
+    # Function to compute the equations output (y) given the input (x) 
     function get_yvals(data, equations)
     	n_eqs = length(equations)
     
@@ -548,7 +554,9 @@ module ESINDyModule
     	end
     	return subplots
     end
-    
+
+
+
     # Complete E-SINDy function 
     function esindy(data, basis, n_bstrap=100; coef_threshold=15, data_fraction=1)
     
