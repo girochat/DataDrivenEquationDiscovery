@@ -451,7 +451,7 @@ module ESINDyModule
     
     	yvals = []
     	for eq in equations
-    		push!(yvals, [eq(x) for x in eachrow([data.X ngf_data.Y])])
+    		push!(yvals, [eq(x) for x in eachrow([data.X data.Y])])
     	end
     	return yvals
     end
