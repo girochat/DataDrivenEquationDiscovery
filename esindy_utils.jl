@@ -365,7 +365,7 @@ module ESINDyModule
     	
     			# Solve data-driven problem with optimal hyperparameters
     			dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(data.X', data.Y[:,eq]')
-    			best_λ, best_ν = 0.6, 0.001# get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
+    			best_λ, best_ν = get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
     			if with_implicits
     				best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, 
                     ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
