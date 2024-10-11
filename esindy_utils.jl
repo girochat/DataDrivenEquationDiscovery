@@ -41,16 +41,16 @@ module ERKModule
 
 
     # Create E-SINDy compatible data structure out of dataframes
-    function create_data(files, smoothing=0.)
-
-        # Load data into dataframe
-        df = CSV.read(files[1], DataFrame)
-        if length(files) > 1
-            for i in 2:length(files)
-                df2 = CSV.read(files[i], DataFrame)
-                df = vcat(df, df2)
-            end
-        end
+    function create_erk_data(files, gf; smoothing=0., var_idxs=[2,4])
+    
+    	# Load data into dataframe
+    	df = CSV.read("./Data/$(files[1])", DataFrame)
+    	if length(files) > 1
+    	    for i in 2:length(files)
+    	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
+    	        df = vcat(df, df2)
+    	    end
+    	end
     
     	# Retrieve the number of samples
     	n_samples = sum(df.time .== 0)
@@ -58,30 +58,27 @@ module ERKModule
     
     	# Define relevant data for E-SINDy
     	time = df.time
-    	X = [df.Raf_fit df.PFB_fit] #[df.R_fit df.Ras_fit df.Raf_fit df.MEK_fit df.PFB_fit]
-    	GT = (0.75 .* df.PFB_fit .* 
-    		(1 .- df.Raf_fit) ./ (0.01 .+ (1 .- df.Raf_fit)))
+    	X = [df.R_fit df.Raf_fit df.ERK_fit df.PFB_fit df.NFB_fit]
+    	if lowercase(gf) == "ngf"
+    		GT = (0.75 .* df.PFB_fit .* 
+    			(1 .- df.Raf_fit) ./ (0.01 .+ (1 .- df.Raf_fit)))
+    	else
+    		GT = repeat([0], length(df.time))
+    	end
     	Y = df.NN_approx
     
     	# Smooth the NN approximation if necessary
-    	if smoothing != 0
-    		smoothed_Y = zeros(size(Y))
-    		for i in 0:(n_samples-1)
-    			x_t = df.time[1 + i*size_sample: (i+1)*size_sample]
-    			y = df.NN_approx[1 + i*size_sample: (i+1)*size_sample]
-    			λ = smoothing
-    			spl = fit(SmoothingSpline, x_t, y, λ)
-    			smoothed_y = predict(spl)
-    			smoothed_Y[1 + i*size_sample: (i+1)*size_sample] = smoothed_y
-    		end
+    	if smoothing != 0.
+    		smoothed_Y = smooth_nn_output(time, Y, n_samples, size_sample, smoothing)
+    		Y = smoothed_Y
     	end
     
     	@assert size(X, 1) == size(Y, 1)
-
+    
     	# Create labels for plotting
-    	labels = make_labels(files)
-    		
-    	return (time=time, X=X, Y=smoothed_Y, GT=GT, labels=labels)
+    	labels = make_erk_labels(files)
+    	
+    	return (time=time, X=X[:,var_idxs], Y=Y, GT=GT, labels=labels)
     end
 
 
@@ -262,8 +259,8 @@ module ESINDyModule
     function get_best_hyperparameters(dd_prob, basis, with_implicits)
     	
     	# Define the range of hyperparameters to consider
-    	scenario = Scenario(λ = (3e-1..9e-1), ν = (1e-1..10),
-    		max_trials = 300, 
+    	scenario = Scenario(λ = 1e-3:1e-3:9e-1, ν = exp10.(-3:1:3),
+    		max_trials = 500, 
     		sampler=HyperTuning.RandomSampler())
     
     	# Find optimal hyperparameters
@@ -290,14 +287,25 @@ module ESINDyModule
  
     	print_flush("Starting E-SINDy Bootstrapping:")
     	Threads.@threads for j in 1:n_bstraps
-	     
-            # Define how much of the data is sampled
-    	    rand_ind = rand(1:size(data.X, 1), floor(Int, size(data.X, 1) * data_fraction))
-    	    
-		    # Define data driven problem with bootstrapped data
-            X = data.X[rand_ind,:]
-    	    Y = data.Y[rand_ind,:]
-    	    dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y')
+
+            # Randomly select 75% of the samples
+    		n_samples = sum(data.time .== 0)
+    		size_sample = Int(length(data.time) / n_samples)
+    		rand_samples = sample(1:n_samples, floor(Int, n_samples * 0.75), replace=false)
+    		
+    		# Sample data in the selected samples
+    		indices = Vector{Int64}()
+    		for rand_sample in (rand_samples .- 1)
+    			i_start = (rand_sample * size_sample) + 1
+    			i_end = (rand_sample+1) * size_sample
+    			indices = vcat(indices, i_start:i_end)
+    		end
+    
+    		# Define data driven problem with sampled data
+    		rand_ind = rand(indices, floor(Int, length(indices) * data_fraction))
+    		X = data.X[rand_ind,:]
+    		Y = data.Y[rand_ind,:]
+    		
     
     		# Check if the problem involves implicits
     		implicits = implicit_variables(basis)
@@ -305,29 +313,39 @@ module ESINDyModule
     		if !isempty(implicits)
     			with_implicits = true
     		end
-    
-    		# Solve problem with optimal hyperparameters
-			best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
-            push!(hyperparam.λ, best_λ)
-        	push!(hyperparam.ν, best_ν)
-        
+    		
     		if with_implicits
-                best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
-                                ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), 
-                                options=options)
-    		else
-    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
-                DataDrivenSparse.SR3(best_λ, best_ν), 
-                options = options) 			
+    			for eq in 1:n_eqs
+    				dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y[:,eq]')
     
-    	    end
-    	    bootstrap_coef[j,:,:] = best_res.out[1].coefficients
-           
+    				# Solve problem with optimal hyperparameters
+    				best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
+    				push!(hyperparam.λ, best_λ)
+    				push!(hyperparam.ν, best_ν)
+    				
+    				best_res = DataDrivenDiffEq.solve(dd_prob, basis, ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
+
+                    # Store library coefficient for current bootstrap
+    				bootstrap_coef[i,eq,:] = best_res.out[1].coefficients
+    			end
+    		else
+    			dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y')
+    			
+    			# Solve problem with optimal hyperparameters
+    			best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
+    			push!(hyperparam.λ, best_λ)
+    			push!(hyperparam.ν, best_ν)
+    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options)
+    			
+    			# Store library coefficient for current bootstrap
+    			bootstrap_coef[i,:,:] = best_res.out[1].coefficients
+    		end
+
             # Print progress 
             push!(progress, j)
             if length(progress) % 10 == 0
                 print_flush("Progress: $(length(progress))/$(n_bstraps)")
-            end            
+            end 
     	end
     	return bootstrap_coef, hyperparam
     end
@@ -343,10 +361,17 @@ module ESINDyModule
     	bootstrap_coef = zeros(n_bstraps, n_eqs, l_basis)
     	indices = [1]
     	best_bic = 1000
+
+        # Track progress while using parallelisation
+        progress = [] 
     
-    	@info "Library E-SINDy Bootstrapping:"
-    	@progress name="Bootstrapping" threshold=0.01 for j in 1:n_bstraps
-    		for eq in 1:n_eqs		
+    	print_flush("Starting Library E-SINDy Bootstrapping:")
+    	Threads.@threads for j in 1:n_bstraps
+    		for eq in 1:n_eqs
+
+                if n_eqs > 1 && j == 1
+                    print_flush("Equation $(eq):")
+                end
     		
     			# Check if the problem involves implicits
     			implicits = implicit_variables(basis)
@@ -384,7 +409,13 @@ module ESINDyModule
     			elseif bt_bic == best_bic
     				bootstrap_coef[j,eq,rand_ind] = best_res.out[1].coefficients
     			end
-    		end
+
+                # Print progress 
+                push!(progress, j)
+                if length(progress) % 10 == 0
+                    print_flush("Progress: $(length(progress))/$(n_bstraps)")
+                end 
+    		end    
     	end
     	return bootstrap_coef 
     end
@@ -426,7 +457,7 @@ module ESINDyModule
     
     
     # Function to build callable function out of symbolic equations
-    function build_equations(coef, basis, verbose=true)
+    function build_equations(coef, basis; verbose=true)
     
     	# Build equation
     	h = [equation.rhs for equation in DataDrivenDiffEq.equations(basis)]
@@ -523,8 +554,9 @@ module ESINDyModule
     	# Plot results
     	n_eqs = size(eqs, 1)
     	subplots = []
-    	palette = colorschemes[:seaborn_colorblind]
+    	palette = colorschemes[:seaborn_colorblind] 
     	for eq in 1:n_eqs
+            i_color = 1
     		if n_eqs > 1
     			p = plot(title="Equation $(eq)", xlabel="Time t", ylabel="Equation y(t)")
     		else
@@ -536,7 +568,6 @@ module ESINDyModule
     			if (sample+1) in sample_idxs
     				i_start = 1 + sample * size_sample
     				i_end = i_start + size_sample - 1
-    				i_color = ceil(Int, 1 + sample * (length(palette) / n_samples))
     				
     				y = y_vals[eq][i_start:i_end] 
     				if iqr
@@ -547,7 +578,9 @@ module ESINDyModule
     				end
     				
     				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end, eq], label="", linestyle=:dash, color=palette[i_color])
+                    i_color = i_color + 1
     			end
+                
     		end
     		plot!(p, [], [],  label="GT", color=:black, linestyle=:dash)
     		push!(subplots, p)

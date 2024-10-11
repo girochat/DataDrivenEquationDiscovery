@@ -69,11 +69,10 @@ basis = build_basis(x[1:size(data.X, 2)], i)
 #lib_coefficients = library_bootstrap(data, basis, n_bstraps, 10)
 
 ##### Run E-SINDy (b(r)agging) #####
-results = esindy(data, basis, n_bstraps, coef_threshold=coef_threshold) 
+esindy_res = esindy(data, basis, n_bstraps, coef_threshold=coef_threshold, data_fraction=1) 
+#esindy_res = (esindy = esindy_res, esindy_lib = lib_coefficients)
 
-#results = (library_esindy = lib_coefficients, esindy_results = results)
-
-# save results
+##### Save results #####
 println("Saving results to ./Data/$(filename).jld2.")
 JLD2.@save "./Data/$(filename).jld2" results
 
