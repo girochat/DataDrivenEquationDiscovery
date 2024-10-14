@@ -40,7 +40,7 @@ else
     files = ARGS[5:end]
 
     println("Running E-SINDy for $(model) model with $(n_bstraps) bootstraps. 
-Coefficient threshold set to $(coef_threshold).\n")
+Coefficient threshold set to $(coef_threshold).")
     flush(stdout)
 end
 
@@ -52,7 +52,7 @@ end
 
 
 ##### Import the data #####
-data = create_data(files, 300.)
+data = create_data(files, smoothing=300., var_idxs=1:5)
 
 
 ##### Set up the SINDy library #####
@@ -74,6 +74,6 @@ esindy_res = esindy(data, basis, n_bstraps, coef_threshold=coef_threshold, data_
 
 ##### Save results #####
 println("Saving results to ./Data/$(filename).jld2.")
-JLD2.@save "./Data/$(filename).jld2" results
+jldsave("./Data/$(filename).jld2"; results=esindy_res)
 
 

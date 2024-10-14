@@ -19,6 +19,7 @@ module ERKModule
     # Make sample labels for plotting
     function make_labels(files)
     	labels = []
+        case = ""
     	for file in files
     		words = split(file, ".")
     		words = split(words[1], "_")
@@ -32,25 +33,30 @@ module ERKModule
     				label = label * "/" * filter(isdigit, word) * "'"
     			elseif occursin("pulse", word)
     				label = label * " (" * filter(isdigit, word) * "x)"
-    			end
+                elseif occursin("gf", lowercase(word))
+                    case = lowercase(word)
+                end
     		end
     		push!(labels, label)
     	end
-    	return labels
+    	return (labels=labels, case=case)
     end
 
 
     # Create E-SINDy compatible data structure out of dataframes
-    function create_erk_data(files, gf; smoothing=0., var_idxs=[2,4])
+    function create_data(files; smoothing=0., var_idxs=[2,4])
     
     	# Load data into dataframe
-    	df = CSV.read("./Data/$(files[1])", DataFrame)
+    	df = CSV.read(files[1], DataFrame)
     	if length(files) > 1
     	    for i in 2:length(files)
-    	        df2 = CSV.read("./Data/$(files[i])", DataFrame)
+    	        df2 = CSV.read(files[i], DataFrame)
     	        df = vcat(df, df2)
     	    end
     	end
+
+    	# Create labels for plotting
+    	labels, case = make_labels(files)
     
     	# Retrieve the number of samples
     	n_samples = sum(df.time .== 0)
@@ -59,7 +65,7 @@ module ERKModule
     	# Define relevant data for E-SINDy
     	time = df.time
     	X = [df.R_fit df.Raf_fit df.ERK_fit df.PFB_fit df.NFB_fit]
-    	if lowercase(gf) == "ngf"
+    	if case == "ngf"
     		GT = (0.75 .* df.PFB_fit .* 
     			(1 .- df.Raf_fit) ./ (0.01 .+ (1 .- df.Raf_fit)))
     	else
@@ -75,10 +81,7 @@ module ERKModule
     
     	@assert size(X, 1) == size(Y, 1)
     
-    	# Create labels for plotting
-    	labels = make_erk_labels(files)
-    	
-    	return (time=time, X=X[:,var_idxs], Y=Y, GT=GT, labels=labels)
+    	return (time=time, X=X[:,var_idxs], Y=Y, GT=GT, labels=labels, case=case)
     end
 
 
@@ -89,6 +92,22 @@ module ERKModule
     	h = DataDrivenDiffEq.polynomial_basis(x, 2)
     	basis = DataDrivenDiffEq.Basis([h; h .* i], x, implicits=i)
         return basis
+    end
+
+
+
+    # Smooth the neural network output
+    function smooth_nn_output(x, NN_y, n_samples, size_sample, smoothing)
+	    smoothed_Y = zeros(size(NN_y))
+	    for i in 0:(n_samples-1)
+		    x_t = x[1 + i*size_sample: (i+1)*size_sample]
+		    y = NN_y[1 + i*size_sample: (i+1)*size_sample]
+		    λ = smoothing
+		    spl = fit(SmoothingSpline, x_t, y, λ)
+		    smoothed_y = predict(spl)
+		    smoothed_Y[1 + i*size_sample: (i+1)*size_sample] = smoothed_y
+	    end
+	    return smoothed_Y
     end
 end
 
@@ -191,7 +210,7 @@ module ESINDyModule
     import ModelingToolkit, Symbolics
     
     # Standard libraries
-    using Statistics, Plots
+    using StatsBase, Statistics, Plots
     
     # External libraries
     using HyperTuning, StableRNGs, Distributions, ColorSchemes, ProgressMeter
@@ -324,9 +343,8 @@ module ESINDyModule
     				push!(hyperparam.ν, best_ν)
     				
     				best_res = DataDrivenDiffEq.solve(dd_prob, basis, ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
-
                     # Store library coefficient for current bootstrap
-    				bootstrap_coef[i,eq,:] = best_res.out[1].coefficients
+    				bootstrap_coef[j,eq,:] = best_res.out[1].coefficients
     			end
     		else
     			dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y')
@@ -338,7 +356,7 @@ module ESINDyModule
     			best_res = DataDrivenDiffEq.solve(dd_prob, basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options)
     			
     			# Store library coefficient for current bootstrap
-    			bootstrap_coef[i,:,:] = best_res.out[1].coefficients
+    			bootstrap_coef[j,:,:] = best_res.out[1].coefficients
     		end
 
             # Print progress 
