@@ -2,10 +2,14 @@
 import OrdinaryDiffEq, Symbolics, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
 
 # Standard libraries
-using Statistics, Plots, CSV, DataFrames, ComponentArrays
+using Statistics, Plots, CSV, DataFrames, ComponentArrays, JLD2
 
 # External libraries
 using Lux, Zygote, StableRNGs
+
+# Activation function module
+include("RBF.jl")
+using .RBF
 
 # Set a random seed for reproducibility
 rng = StableRNG(1111)
@@ -46,7 +50,7 @@ end
 # Set the ODE parameters relative to specific case
 GF_PFB = 0
 GF_concentration = 0
-if GF == "egf"
+if GF == "EGF"
     GF_PFB = 0
     if CC == "high"
         GF_concentration = 25
@@ -133,7 +137,6 @@ p_fix[10] = GF_PFB
 
 
 
-
 ##### Simulate data with noise #####
 
 # Define and solve ODE problem for specific case
@@ -157,19 +160,23 @@ scatter!(time, xₙ_ERK, color = :blue, label = "ERK Noisy Data", idxs=4)
 
 ##### Solve UDE #####
 
-rbf(x) = exp.(-(x .^ 2))
+#rbf(x) = exp.(-(x .^ 2))
 
 # Multilayer FeedForward
-const U = Lux.Chain(Lux.Dense(7, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 25, rbf), Lux.Dense(25, 1))
+const U = Lux.Chain(Lux.Dense(7, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 1))
 
 # Get the initial parameters and state variables of the model
-p, st = Lux.setup(rng, U)
-const _st = st
+#p, st = Lux.setup(rng, U)
+#const _st = st
+
+nn_architecture = load("./Data/$(GF)_nn_param.jld2")["architecture"]
+p = nn_architecture.p
+const _st = nn_architecture.st
 
 # Define the hybrid model
 function ode_discovery!(du, u, p, t, p_true)
 
-	# Estimate ODE solution with NN
+    # Estimate ODE solution with NN
 	û = U(u, p, _st)[1] 
 
 	# Retrieve known parameters
@@ -192,7 +199,7 @@ function ode_discovery!(du, u, p, t, p_true)
 	# Raf equation combined with NN function
 	du[3] = (k1_Raf * u[2] * ((1-u[3]) / (Km_Raf + (1-u[3]))) * 
 	        ((K_NFB)^2 / (K_NFB^2 + u[6]^2)) - 
-	         kd_Raf * P_Raf * u[3] / (Km_aRaf + u[3]) + û[1])
+	         (kd_Raf * P_Raf * u[3] / (Km_aRaf + u[3])) + û[1])
 	         
 			 #k2_Raf * u[7] * (1-u[3]) / (K_PFB + (1-u[3])))
 
@@ -228,7 +235,7 @@ prob_nn = ModelingToolkit.ODEProblem(nn_dynamics!, u0, tspan, p)
 function predict(θ, T=time)
     _prob = ModelingToolkit.remake(prob_nn, p = θ)
     Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.AutoVern7(OrdinaryDiffEq.Rodas5P()), saveat = T,
-                abstol = 1e-10, reltol = 1e-10,
+                abstol = 1e-12, reltol = 1e-12,
                 sensealg=SciMLSensitivity.QuadratureAdjoint(autojacvec=SciMLSensitivity.ReverseDiffVJP(true))))
 end
 
@@ -263,7 +270,7 @@ if !isempty(losses)
 end
 
 # Solve UDE first by running Adam optimizer
-res1 = Optimization.solve(optprob1, OptimizationOptimisers.Adam(), callback = callback, maxiters = 5000)
+res1 = Optimization.solve(optprob1, OptimizationOptimisers.Adam(), callback = callback, maxiters = 500)
 println("Training loss after $(length(losses)) iterations: $(losses[end])")
 
 # Finish solving UDE by running LBFGS optimizer
@@ -280,6 +287,9 @@ p_trained = res2.u
 ts = first(X.t):(mean(diff(X.t))):last(X.t)
 X̂ = predict(p_trained, ts)
 
+# Save/update neural network parameters
+jldsave("./Data/$(GF)_nn_param.jld2"; architecture=(p=p_trained, st=_st))
+
 # Estimate UDE unknown part
 û = U(X̂, p_trained, _st)[1]
 
@@ -288,7 +298,7 @@ u = (p_fix[10] .* X[7,:] .* (1 .- X[3,:]) ./ (p_fix[15] .+ (1 .- X[3,:])))
 
 # Plot the simulated data, trained solution and ground truth ERK dynamics
 p1 = plot(X, color = :skyblue, linewidth=8, label = "ERK Ground truth", idxs=5)
-plot!(p1, ts, X̂[5,:], xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), color = :black, linewidth=2, label = "ERK Approximation (UDE)", title="Fitted ERK dynamics after $(GF) stimulation")
+plot!(p1, ts, X̂[5,:], xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), color = :black, linewidth=2, label = "ERK Approximation (UDE)", title="Fitted ERK dynamics after $(GF) stimulation ($(CC) concentration))")
 scatter!(p1, time, xₙ_ERK, color = :darkorange, alpha=0.75, label = "Noisy ERK Data")
 
 # Plot unknown part approximated by NN with ground truth
@@ -297,7 +307,7 @@ plot!(p2, X.t, u, linewidth=2, label="Ground truth", legend_position=:bottomrigh
 
 # Final two panels plot
 nn_plot = plot(p1, p2, layout=(2,1), size=(600, 800))
-#savefig(nn_plot, "./Plots/$(filename)_nn_plot.png")
+#savefig(nn_plot, "./Plots/$(filename)_nn_plot.svg")
 
 
 # Plot UDE full results for all model species
@@ -356,4 +366,4 @@ df = DataFrame((
     ERK_GT=X[5,:],
     NFB_GT=X[6,:],
     PFB_GT=X[7,:]))
-CSV.write("./Data/$(filename).csv", df, header=true)
+#CSV.write("./Data/$(filename).csv", df, header=true)

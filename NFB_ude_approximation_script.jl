@@ -32,7 +32,7 @@ end
 
 # Define which case (noFB, a, b, ab) to run the UDE approximation for
 string_CC = replace(string(input_CC), "." => "")
-filename = string("NFB_", type_NFB, "_", string_CC, "_relu_16d")
+filename = string("NFB_", type_NFB, "_", string_CC)
 if occursin("no", type_NFB)
     x1=0
     x2=0
@@ -106,7 +106,7 @@ xₙ_g2p = abs.(x_g2p .+ (noise_magnitude * x̄_g2p) .* randn(rng, eltype(x_g2p)
 
 # Define a Multilayer FeedForward with Lux.jl
 rbf(x) = exp.(-(x .^ 2))
-const U = Lux.Chain(Lux.Dense(3, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 10, relu), Lux.Dense(10, 2, relu))
+const U = Lux.Chain(Lux.Dense(3, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 2, softplus))
 
 # Get the initial parameters and state variables of the model
 p, st = Lux.setup(rng, U)
@@ -146,7 +146,7 @@ prob_nn = ModelingToolkit.ODEProblem(nn_NFB!, u0, tspan, p)
 function predict(θ, T=time)
     _prob = ModelingToolkit.remake(prob_nn, p = θ)
     Array(OrdinaryDiffEq.solve(_prob, OrdinaryDiffEq.AutoVern7(OrdinaryDiffEq.Rodas5P()), saveat = T,
-        abstol = 1e-10, reltol = 1e-10, 
+        abstol = 1e-12, reltol = 1e-12, 
 		sensealg=SciMLSensitivity.QuadratureAdjoint(autojacvec=SciMLSensitivity.ReverseDiffVJP(true))))
 end
 
