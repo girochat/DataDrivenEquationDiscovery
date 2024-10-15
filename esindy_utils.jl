@@ -21,7 +21,8 @@ module ERKModule
     	labels = []
         case = ""
     	for file in files
-    		words = split(file, ".")
+            words = split(file, "/")
+    		words = split(words[end], ".")
     		words = split(words[1], "_")
     		label = ""
     		for word in words
@@ -625,7 +626,7 @@ module ESINDyModule
             basis=basis, 
             equations=y, 
             bootstraps=bootstrap_res, 
-            coef_mean=e_coef, 
+            coef_median=e_coef, 
             coef_low=low_coef, 
             coef_up=up_coef,
             hyperparameters=hyperparameters)
