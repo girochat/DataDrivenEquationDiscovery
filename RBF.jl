@@ -4,10 +4,10 @@ module RBF
     export mytanh
 
     function rbf(x)
-	    return exp.(-x .^ 2)
+	    return Base.exp.(-x .^ 2)
     end
 
     function mytanh(x)
-	    return tanh.(x)
+	    return Base.tanh.(x)
     end
 end
