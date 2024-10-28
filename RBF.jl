@@ -1,7 +1,7 @@
 module RBF
 
-export rbf
-export mytanh
+    export rbf
+    export mytanh
 
     function rbf(x)
 	    return exp.(-x .^ 2)
