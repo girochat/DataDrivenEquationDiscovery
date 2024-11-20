@@ -327,7 +327,7 @@ module ESINDyModule
     		
     
     		# Check if the problem involves implicits
-    		implicits = implicit_variables(basis)
+    		implicits = getfield(basis, :implicit)
     		with_implicits = false
     		if !isempty(implicits)
     			with_implicits = true
@@ -471,7 +471,21 @@ module ESINDyModule
     	end
     	return (median=m, q_low=q_low, q_up=q_up)
     end
-    
+
+
+
+    # Function to build the reduced basis based on Library E-SINDy results
+    function build_basis(lib_bootstraps, basis)
+
+        # Find all library terms that were picked during Library E-SINDy
+        lib_stats = compute_coef_stat(lib_bootstraps, 0)
+    	lib_ind = findall(!iszero, lib_stats.median[1,:])
+
+        # Build library basis
+    	lib_basis = DataDrivenDiffEq.Basis(basis[lib_ind], x, implicits=i[1:1])
+    	return lib_basis
+    end
+
 
     
     # Function to build callable function out of symbolic equations
