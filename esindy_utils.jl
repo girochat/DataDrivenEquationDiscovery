@@ -6,8 +6,8 @@ module ERKModule
     
     # External libraries
     using SmoothingSplines
-    
-    # Packages under development (debugging)
+
+    # Data Driven Equation Discovery packages
     using DataDrivenDiffEq, DataDrivenSparse
 
 
@@ -94,7 +94,6 @@ module ERKModule
     	basis = DataDrivenDiffEq.Basis([h; h .* i], x, implicits=i)
         return basis
     end
-
 
 
     # Smooth the neural network output
@@ -473,7 +472,7 @@ module ESINDyModule
     	return (median=m, q_low=q_low, q_up=q_up)
     end
     
-    
+
     
     # Function to build callable function out of symbolic equations
     function build_equations(coef, basis; verbose=true)
@@ -483,7 +482,7 @@ module ESINDyModule
     	final_eqs = [sum(row .* h) for row in eachrow(coef)]
     
     	# Solve equation wrt the implicit variable if any
-    	implicits = implicit_variables(basis)
+    	implicits = getfield(basis, :implicit)
     	if !isempty(implicits)
     		final_eqs = ModelingToolkit.solve_for(final_eqs .~ 0, implicits)
     	end
