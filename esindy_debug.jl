@@ -469,7 +469,7 @@ end
 
 # ╔═╡ 79b03041-01e6-4d8e-b900-446511c81058
 # Bootstrapping function that estimate optimal library terms given data
-function library_bootstrap(data, basis, n_bstraps, n_libterms; implicit_id=none)
+function library_bootstrap(data, basis, n_bstraps, n_libterms; implicit_id=nothing, hyperparameters=nothing)
 
 	# Initialise the coefficient array
 	n_eqs = size(data.Y, 2)
@@ -499,7 +499,11 @@ function library_bootstrap(data, basis, n_bstraps, n_libterms; implicit_id=none)
 	
 			# Solve data-driven problem with optimal hyperparameters
 			dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(data.X', data.Y[:,eq]')
-			best_λ, best_ν = 0.6, 1000 #get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
+			if !isnothing(hyperparameters)
+				best_λ, best_ν = hyperparameters
+			else
+				best_λ, best_ν = get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
+			end
 			if with_implicits
 				best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
 			else
@@ -844,7 +848,7 @@ md"""
 # ╔═╡ df7f0f7e-1bfa-4d7e-a817-8dc20a3ec0c4
 begin
 	# Run first library E-SINDy to reduce the library size
-	#ngf_lib_res = esindy(ngf_data_full, erk_basis_full, 5000, 10, implicit_id=22)
+	#ngf_lib_res = library_bootstrap(ngf_data_full, erk_basis_full, 5000, 10, implicit_id=22, hyperparameters=(0.6, 1000))
 	#ngf_lib_basis = build_basis(ngf_lib_res, erk_basis_full)
 end
 
@@ -869,12 +873,6 @@ begin
 	ngf_res_full = load("./Data/ngf_esindy_100bt_full2.jld2")["results"]
 	ngf_res_full_lib = load("./Data/ngf_esindy_100bt_full_lib.jld2")["results"]
 end
-
-# ╔═╡ 1f055fd8-c26e-46e0-bffe-51cadbfb6410
-findall(!iszero, ngf_res_full.masks[1][4].mask)
-
-# ╔═╡ 4feff5b4-66dd-4e69-ab1e-95d4363c8cb0
-ngf_res.masks
 
 # ╔═╡ 3bd630ad-f546-4b0b-8f3e-98367de739b1
 md"""
@@ -1198,13 +1196,11 @@ md"""
 # ╟─034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╟─0f7076ef-848b-4b3c-b918-efb6419787be
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
-# ╟─c7e825a3-8ce6-48fc-86ac-21810d32bbfb
-# ╟─79b03041-01e6-4d8e-b900-446511c81058
+# ╠═c7e825a3-8ce6-48fc-86ac-21810d32bbfb
+# ╠═79b03041-01e6-4d8e-b900-446511c81058
 # ╠═85c913fa-23be-4d01-9a78-47f786d9a4cd
 # ╠═d0fd11e2-0f4c-42f4-b90f-fda24269b6e2
 # ╠═0d136529-28a5-406c-958d-28df99498f66
-# ╠═1f055fd8-c26e-46e0-bffe-51cadbfb6410
-# ╠═4feff5b4-66dd-4e69-ab1e-95d4363c8cb0
 # ╠═acf3c904-9784-4b43-983e-8dd35763c100
 # ╠═74b2ade4-884b-479d-9fee-828d37d7ab47
 # ╟─64246dd6-8aa6-4ebd-8385-624f5bffd7c7
@@ -1219,7 +1215,7 @@ md"""
 # ╟─1f3f1461-09f1-4825-bb99-4064e075e23e
 # ╠═b73f3450-acfd-4b9e-9b7f-0f7289a62976
 # ╟─3b541b2d-6644-4376-beb8-6e8587be286c
-# ╟─df7f0f7e-1bfa-4d7e-a817-8dc20a3ec0c4
+# ╠═df7f0f7e-1bfa-4d7e-a817-8dc20a3ec0c4
 # ╟─92f3a5ea-9838-400a-9120-52534d9cad52
 # ╟─02c625dc-9d21-488e-983b-c3e2c40e0aad
 # ╠═04538fbf-63b7-4394-b281-f047d0c3ea51
