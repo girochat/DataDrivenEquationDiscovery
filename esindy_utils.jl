@@ -225,6 +225,7 @@ module ESINDyModule
     export get_best_hyperparameters
     export sindy_bootstrap
     export library_bootstrap
+    export coef_simplify_expression
     export compute_coef_stat
     export build_equations
     export get_yvals
@@ -436,6 +437,43 @@ module ESINDyModule
     		end    
     	end
     	return bootstrap_coef 
+    end
+
+
+
+    # Function to simplify the expression of the final equation returned by SINDy (limit redundancy of 
+    # expressions)
+    function coef_simplify_expression(coefs, basis)
+    	
+    	# Get only right hand side of the library terms
+    	h = [equation.rhs for equation in equations(basis)]
+    
+    	# Get the expression out of the coefficients and the basis
+    	expression = sum(coefs .* h)
+    
+    	# Solve wrt the implicit variable and simplify
+    	implicit = getfield(basis, :implicit)
+    	implicit_id = findall(x -> (x == 0.1), [substitute(term.rhs, Dict([i[1] => 0.1, 
+                        x[1] => 2, x[2] => 3, x[3] => 4, x[4] => 5, x[5]=> 6])) for term in basis])
+    	simpl_expr = simplify(ModelingToolkit.solve_for(expression .~ 0, implicit)[1])
+    
+    	# Update the coefficients wrt to the simplified expression
+    	simpl_coefs = zeros(size(coefs))
+    	for (j, term) in enumerate(basis)
+    		try
+    			simpl_coef = Symbolics.coeff(simpl_expr, term.rhs)
+    			if isempty(Symbolics.get_variables(simpl_coef))
+    				if j == implicit_id && simpl_coef == 0
+    					simpl_coefs[j] = -1
+    				else
+    					simpl_coefs[j] = simpl_coef
+    				end
+    			end
+    		catch
+    			simpl_coefs[j] = coefs[j]
+    		end
+    	end
+    	return simpl_coefs
     end
 
 
