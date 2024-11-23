@@ -14,10 +14,10 @@ begin
 	import ModelingToolkit, Symbolics
 	
 	# Standard libraries
-	using StatsBase, Plots, CSV, DataFrames#, Printf, Statistics
+	using StatsBase, Plots, CSV, DataFrames
 
 	# External libraries
-	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ColorSchemes, JLD2, ProgressLogging #, Combinatorics
+	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ColorSchemes, JLD2, ProgressLogging
 
 	# Packages under development
 	using DataDrivenDiffEq, DataDrivenSparse
@@ -258,9 +258,7 @@ function library_bootstrap(data, basis, n_bstraps, n_libterms; implicit_id=nothi
 
 	@info "Library E-SINDy Bootstrapping:"
 	@progress name="Bootstrapping" threshold=0.01 for j in 1:n_bstraps
-		println(j)
-		for eq in 1:n_eqs
-			println(eq)
+		for eq in 1:n_eq
 
 			# Create bootstrap library basis
 			if !isempty(implicits)
@@ -303,43 +301,6 @@ function library_bootstrap(data, basis, n_bstraps, n_libterms; implicit_id=nothi
 	end
 	return bootstrap_coef 
 end
-
-# ╔═╡ 2104057c-9687-4fca-ac73-da2d711c9741
-# ╠═╡ disabled = true
-#=╠═╡
-# Function to simplify the expression of the final equation returned by SINDy (limit redundancy of expressions)
-function coef_simplify_expression(coefs, basis)
-	
-	# Get only right hand side of the library terms
-	h = [equation.rhs for equation in equations(basis)]
-
-	# Get the expression out of the coefficients and the basis
-	expression = sum(coefs .* h)
-
-	# Solve wrt the implicit variable and simplify
-	implicit = getfield(basis, :implicit)
-	implicit_id = findall(x -> (x == 0.1), [substitute(term.rhs, Dict([i[1] => 0.1, x[1] => 2, x[2] => 3, x[3] => 4, x[4] => 5, x[5]=> 6])) for term in basis])
-	simpl_expr = simplify(ModelingToolkit.solve_for(expression .~ 0, implicit)[1])
-
-	# Update the coefficients wrt to the simplified expression
-	simpl_coefs = zeros(size(coefs))
-	for (j, term) in enumerate(basis)
-		try
-			simpl_coef = Symbolics.coeff(simpl_expr, term.rhs)
-			if isempty(Symbolics.get_variables(simpl_coef))
-				if j == implicit_id & simpl_coef == 0
-					simpl_coefs[j] = -1
-				else
-					simpl_coefs[j] = simpl_coef
-				end
-			end
-		catch
-			simpl_coefs[j] = coefs[j]
-		end
-	end
-	return simpl_coefs
-end
-  ╠═╡ =#
 
 # ╔═╡ 85c913fa-23be-4d01-9a78-47f786d9a4cd
 # Function to identify the candidate equations returned during E-SINDy
@@ -415,45 +376,6 @@ function compute_ecoef(bootstrap_res, coef_threshold)
 	end
 	return m
 end
-
-# ╔═╡ 97ae69f0-764a-4aff-88cd-91accf6bb3fd
-# ╠═╡ disabled = true
-#=╠═╡
-# Function to build callable function out of symbolic equations
-function build_equations(coef, basis; verbose=true)
-
-	# Build equation
-	h = [equation.rhs for equation in DataDrivenDiffEq.equations(basis)]
-	eqs = [sum(row .* h) for row in eachrow(coef)]
-	final_eqs = []
-	
-	# Solve equation wrt the implicit variable if any
-	implicits = getfield(basis, :implicit)
-	if !isempty(implicits)
-		for eq in 1:size(eqs, 1)
-			try
-				solution = ModelingToolkit.solve_for(eqs[eq] .~ 0, implicits)[1]
-				push!(final_eqs, solution)
-			catch exception
-				push!(final_eqs, NaN)
-			end
-		end
-	else
-		final_eqs = eqs
-	end
-
-	# Build callable function and print equation
-	y = []
-	for (j, eq) in enumerate(final_eqs)
-		if verbose
-			println("y$(j) = $(eq)")
-		end
-		push!(y, Symbolics.build_function(eq, [x[1:5]; i[1]], expression = Val{false}))
-	end
-	
-	return y
-end
-  ╠═╡ =#
 
 # ╔═╡ aefb3b75-af6a-4bc9-98f8-713144b24c5a
 # Function to compute the interquartile range of the estimated equation
@@ -620,7 +542,7 @@ md"""
 # ╔═╡ 04538fbf-63b7-4394-b281-f047d0c3ea51
 begin
 	#jldsave("./Data/ngf_esindy_100bt.jld2"; results=ngf_res)
-	#ngf_res = load("./Data/ngf_esindy_100bt.jld2")["results"]
+	ngf_res = load("./Data/ngf_esindy_100bt.jld2")["results"]
 end
 
 # ╔═╡ 62d79e8d-6d82-4fea-a596-8c32dd16d78e
@@ -715,9 +637,9 @@ end
 # ╠═a806fdd2-5017-11ef-2351-dfc89f69b334
 # ╟─9ebfadf0-b711-46c0-b5a2-9729f9e042ee
 # ╟─d6b1570f-b98b-4a98-b5e5-9d747930a5ab
-# ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
-# ╟─d9b1a318-2c07-4d44-88ec-501b2cfc940b
-# ╟─c8841434-a7af-4ade-a444-e6bc47575811
+# ╠═6c7929f5-15b2-4e19-8c26-e709f0da182e
+# ╠═d9b1a318-2c07-4d44-88ec-501b2cfc940b
+# ╠═c8841434-a7af-4ade-a444-e6bc47575811
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
 # ╟─0f5e0785-2778-4fde-b010-7fcf813ceed2
@@ -726,24 +648,22 @@ end
 # ╠═034f5422-7259-42b8-b3b3-e34cfe47b7b7
 # ╠═0f7076ef-848b-4b3c-b918-efb6419787be
 # ╟─5ef43425-ca26-430c-a62d-e194a8b1aebb
-# ╠═c7e825a3-8ce6-48fc-86ac-21810d32bbfb
+# ╟─c7e825a3-8ce6-48fc-86ac-21810d32bbfb
 # ╟─79b03041-01e6-4d8e-b900-446511c81058
-# ╠═2104057c-9687-4fca-ac73-da2d711c9741
 # ╟─85c913fa-23be-4d01-9a78-47f786d9a4cd
 # ╟─74b2ade4-884b-479d-9fee-828d37d7ab47
-# ╟─97ae69f0-764a-4aff-88cd-91accf6bb3fd
 # ╟─aefb3b75-af6a-4bc9-98f8-713144b24c5a
 # ╟─cc2395cc-00df-4e5e-8573-e85ce813fd41
 # ╟─012a5186-03aa-482d-bb62-ecba49587877
 # ╟─569c7600-246b-4a64-bba5-1e74a5888d8c
 # ╟─e49b5f76-d04b-4b19-a4c8-a3a3a1b40f1b
 # ╟─1f3f1461-09f1-4825-bb99-4064e075e23e
-# ╠═b73f3450-acfd-4b9e-9b7f-0f7289a62976
+# ╟─b73f3450-acfd-4b9e-9b7f-0f7289a62976
 # ╟─8e71a2ec-c4cd-45bb-8537-76096ef0d0cb
 # ╟─df7f0f7e-1bfa-4d7e-a817-8dc20a3ec0c4
 # ╟─02c625dc-9d21-488e-983b-c3e2c40e0aad
-# ╠═04538fbf-63b7-4394-b281-f047d0c3ea51
-# ╠═62d79e8d-6d82-4fea-a596-8c32dd16d78e
+# ╟─04538fbf-63b7-4394-b281-f047d0c3ea51
+# ╟─62d79e8d-6d82-4fea-a596-8c32dd16d78e
 # ╟─3bd630ad-f546-4b0b-8f3e-98367de739b1
 # ╟─5c400147-353a-43f2-9de6-c234e13f06c9
 # ╟─de4c57fe-1a29-4354-a5fe-f4e184de4dd3
