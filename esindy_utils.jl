@@ -225,8 +225,9 @@ module ESINDyModule
     export get_best_hyperparameters
     export sindy_bootstrap
     export library_bootstrap
-    export coef_simplify_expression
-    export compute_coef_stat
+    export simplify_expression
+    export compute_ecoef
+    export get_coef_mask
     export build_equations
     export get_yvals
     export compute_CI
@@ -343,9 +344,14 @@ module ESINDyModule
     				push!(hyperparam.λ, best_λ)
     				push!(hyperparam.ν, best_ν)
     				
-    				best_res = DataDrivenDiffEq.solve(dd_prob, basis, ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
-                    # Store library coefficient for current bootstrap
-    				bootstrap_coef[j,eq,:] = best_res.out[1].coefficients
+    				best_res = DataDrivenDiffEq.solve(dd_prob, basis, 
+                    ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
+    				
+                    # Simplify the symbolic expression to get the final coefficients
+    				simpl_coefs = simplify_expression(best_res.out[1].coefficients[1,:], basis)
+    				
+    				# Store library coefficient for current bootstrap
+    				bootstrap_coef[i,eq,:] = simpl_coefs
     			end
     		else
     			dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y')
@@ -354,7 +360,8 @@ module ESINDyModule
     			best_λ, best_ν = get_best_hyperparameters(dd_prob, basis, with_implicits)
     			push!(hyperparam.λ, best_λ)
     			push!(hyperparam.ν, best_ν)
-    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options)
+    			best_res = DataDrivenDiffEq.solve(dd_prob, basis, DataDrivenSparse.SR3(best_λ, best_ν), 
+                options = options)
     			
     			# Store library coefficient for current bootstrap
     			bootstrap_coef[j,:,:] = best_res.out[1].coefficients
@@ -368,6 +375,7 @@ module ESINDyModule
     	end
     	return bootstrap_coef, hyperparam
     end
+
 
 
 
@@ -401,7 +409,8 @@ module ESINDyModule
     				with_implicits = true
     				idxs = [1:(implicit_id-1); (implicit_id+1):l_basis]
     				rand_ind = [sample(idxs, n_libterms, replace=false); implicit_id]
-    				bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], x[1:size(data.X, 2)], implicits=i[1:1])
+    				bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], 
+                    x[1:size(data.X, 2)], implicits=i[1:1])
     			else
     				rand_ind = sample(1:l_basis, n_libterms, replace=false)
     				bt_basis = DataDrivenDiffEq.Basis(basis[rand_ind], x[1:size(data.X, 2)])
@@ -414,7 +423,8 @@ module ESINDyModule
     				best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, 
                     ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
     			else
-        			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, DataDrivenSparse.SR3(best_λ, best_ν), options = options)
+        			best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, 
+                    DataDrivenSparse.SR3(best_λ, best_ν), options = options)
     			end
     
     			# Check if bootstrap basis is optimal
@@ -441,9 +451,10 @@ module ESINDyModule
 
 
 
+
     # Function to simplify the expression of the final equation returned by SINDy (limit redundancy of 
     # expressions)
-    function coef_simplify_expression(coefs, basis)
+    function simplify_expression(coefs, basis)
     	
     	# Get only right hand side of the library terms
     	h = [equation.rhs for equation in equations(basis)]
@@ -463,7 +474,7 @@ module ESINDyModule
     		try
     			simpl_coef = Symbolics.coeff(simpl_expr, term.rhs)
     			if isempty(Symbolics.get_variables(simpl_coef))
-    				if j == implicit_id && simpl_coef == 0
+    				if j == implicit_id & simpl_coef == 0
     					simpl_coefs[j] = -1
     				else
     					simpl_coefs[j] = simpl_coef
@@ -477,9 +488,10 @@ module ESINDyModule
     end
 
 
+
     
-    # Function to estimate coefficient statistics (mean, std)
-    function compute_coef_stat(bootstrap_res, coef_threshold)
+    # Function to estimate coefficient statistics
+    function compute_ecoef(bootstrap_res, coef_threshold)
     
     	# Retrieve dimensions of the problem
     	sample_size = size(bootstrap_res, 1)
@@ -493,22 +505,68 @@ module ESINDyModule
     	mask = inclusion_prob .> coef_threshold
     	masked_res = bootstrap_res .* mask
     
-    	# Compute the mean and std of ensemble coefficients
+    	# Compute the mean 
     	m = zeros(Float64, n_eqs, n_terms)
-    	q_low = zeros(Float64, n_eqs, n_terms)
-    	q_up= zeros(Float64, n_eqs, n_terms)
     	for i in 1:n_eqs
     		for j in 1:n_terms
     			current_coef = filter(!iszero, masked_res[:,i,j])
     			if !isempty(current_coef)
     				m[i,j] = median(current_coef) 
-    				q_low[i,j] = percentile(current_coef, 5)
-    				q_up[i,j] = percentile(current_coef, 95)
     			end
     		end
     	end
-    	return (median=m, q_low=q_low, q_up=q_up)
+    	return m
     end
+
+
+
+
+    # Function to identify the candidate equations returned during E-SINDy
+    function get_coef_mask(bootstraps)
+    	
+    	# Repeat for each equation
+    	n_eqs = size(bootstraps, 2)
+    	eq_masks = []
+    	for eq in 1:n_eqs
+    
+    		# Initialise set of masks
+    		masks = []
+    		mask_set = Set()
+    
+    		# Define mask corresponding to non-zero coefficients
+    		n_bootstraps = size(bootstraps, 1)
+    		for k in 1:n_bootstraps
+    			mask = (!iszero).(bootstraps[k,eq:eq,:])
+    			if mask in mask_set
+    				nothing
+    			else
+    				# Compute the frequency of current mask
+    				push!(mask_set, mask)
+    				freq = 0
+    				coefs = []
+    				for j in k:n_bootstraps
+    					temp_mask = (!iszero).(bootstraps[j,eq:eq,:])
+    					if isequal(mask, temp_mask)
+    						push!(coefs, bootstraps[j,eq:eq,:])
+    						freq = freq + 1
+    					end
+    				end
+
+    				# Compute mean and std of the coefficients of current mask
+    				coef_std = std(coefs)
+    				if any(isnan, coef_std)
+    					nothing
+    				else
+    					push!(masks, (mask=mask, freq=freq/n_bootstraps, coef_mean=mean(coefs),
+                            coef_std=coef_std/sqrt(n_bootstraps)))
+    				end
+    			end
+    		end
+    		push!(eq_masks, masks)
+    	end
+    	return eq_masks
+    end
+
 
 
 
@@ -525,18 +583,29 @@ module ESINDyModule
     end
 
 
+
     
     # Function to build callable function out of symbolic equations
     function build_equations(coef, basis; verbose=true)
     
     	# Build equation
     	h = [equation.rhs for equation in DataDrivenDiffEq.equations(basis)]
-    	final_eqs = [sum(row .* h) for row in eachrow(coef)]
-    
+    	eqs = [sum(row .* h) for row in eachrow(coef)]
+    	final_eqs = []
+    	
     	# Solve equation wrt the implicit variable if any
     	implicits = getfield(basis, :implicit)
     	if !isempty(implicits)
-    		final_eqs = ModelingToolkit.solve_for(final_eqs .~ 0, implicits)
+    		for eq in 1:size(eqs, 1)
+    			try
+    				solution = ModelingToolkit.solve_for(eqs[eq] .~ 0, implicits)[1]
+    				push!(final_eqs, solution)
+    			catch exception
+    				push!(final_eqs, NaN)
+    			end
+    		end
+    	else
+    		final_eqs = eqs
     	end
     
     	# Build callable function and print equation
@@ -547,9 +616,11 @@ module ESINDyModule
     		end
     		push!(y, Symbolics.build_function(eq, [x[1:5]; i[1]], expression = Val{false}))
     	end
+    	
     	return y
     end
     
+
 
     
     # Function to compute the equations output (y) given the input (x) 
@@ -565,37 +636,43 @@ module ESINDyModule
 
 
 
+
     # Function to compute the interquartile range of the estimated equation
-    function compute_CI(data, coef_low, coef_up, basis)
+    function compute_CI(data, basis, masks)
     
-    	# Build uniform distribution for non-zero coefficients
-    	indices = findall(!iszero, coef_up .- coef_low)
-    	coef_distrib = [Uniform(coef_low[k], coef_up[k]) for k in indices]
+    	freqs = Weights([mask.freq for mask in masks])
     
     	# Run MC simulations to estimate the distribution of estimated equations 
     	n_simulations = 1000
     	results = zeros(n_simulations, size(data.Y, 1), size(data.Y, 2))
-    	current_coef = zeros(size(coef_up))
-        for i in 1:n_simulations
+    	
+    	for i in 1:n_simulations
+    		current_coef = zeros(size(masks[1].coef_mean))
+    		mask = sample(masks, freqs)
     		
+    		# Build Normal distribution for non-zero coefficients
+    		indices = findall(!iszero, mask.mask)
+    		mask.coef_std[iszero.(mask.coef_std)] .= 1e-12
+    		coef_distrib = [Normal(mask.coef_mean[k], mask.coef_std[k]) for k in indices]
+    
     		# Samples coefficient from the distribution
-    		sample = [rand(distrib) for distrib in coef_distrib]
-    		current_coef[indices] = sample
+    		coef_sample = [rand(distrib) for distrib in coef_distrib]
+    		current_coef[indices] = coef_sample
     
     		# Calculate function value given sample of coef.
     		current_eqs = build_equations(current_coef, basis, verbose=false)
-    		yvals = get_yvals(data, current_eqs)
+    		yvals = ESINDyModule.get_yvals(data, current_eqs)
     		n_eqs = length(current_eqs)
     		for eq in 1:n_eqs
     			results[i,:,eq] = yvals[eq]
     		end
     	end
-    
-    	iqr_low = mapslices(row -> minimum(row), results, dims=1)
-    	iqr_up = mapslices(row -> maximum(row), results, dims=1)
+    	iqr_low = mapslices(row -> percentile(filter(!isnan, row), 25), results, dims=1)
+    	iqr_up = mapslices(row -> percentile(filter(!isnan, row), 75), results, dims=1)
     
         return (iqr_low=iqr_low[1,:,:], iqr_up=iqr_up[1,:,:])
     end
+
 
 
 
@@ -604,7 +681,7 @@ module ESINDyModule
     
     	# Retrieve results
     	data, basis = results.data, results.basis
-    	coef_median, coef_low, coef_up = results.coef_median, results.coef_low, results.coef_up
+    	coef_median = results.coef_median
     	eqs = build_equations(coef_median, basis, verbose=false)
     	y_vals = get_yvals(data, eqs)
     
@@ -614,18 +691,20 @@ module ESINDyModule
     	if isnothing(sample_idxs)
     		sample_idxs = 1:n_samples
     	end
-    	
-    	# Compute confidence interval if necessary
-    	ci_low, ci_up = nothing, nothing
-    	if iqr
-    		ci_low, ci_up = compute_CI(data, coef_low, coef_up, basis)
-    	end
+    
     	
     	# Plot results
     	n_eqs = size(eqs, 1)
     	subplots = []
     	palette = colorschemes[:seaborn_colorblind] 
     	for eq in 1:n_eqs
+
+            # Compute interquartile range if necessary
+        	ci_low, ci_up = nothing, nothing
+        	if iqr
+        		ci_low, ci_up = compute_CI(data, basis, results.masks[eq])
+        	end
+            
             i_color = 1
     		if n_eqs > 1
     			p = plot(title="Equation $(eq)", xlabel="Time t", ylabel="Equation y(t)")
@@ -641,13 +720,17 @@ module ESINDyModule
     				
     				y = y_vals[eq][i_start:i_end] 
     				if iqr
-    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], color=palette[i_color],
-    					ribbon=(y - ci_low[i_start:i_end, eq], ci_up[i_start:i_end, eq] - y), fillalpha=0.15)
+    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], 
+                        color=palette[i_color],
+    					ribbon=(y - ci_low[i_start:i_end, eq], ci_up[i_start:i_end, eq] - y), 
+                        fillalpha=0.15)
     				else
-    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], color=palette[i_color])
+    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], 
+                        color=palette[i_color])
     				end
     				
-    				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end, eq], label="", linestyle=:dash, color=palette[i_color])
+    				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end, eq], label="", 
+                    linestyle=:dash, color=palette[i_color])
                     i_color = i_color + 1
     			end
                 
@@ -660,14 +743,18 @@ module ESINDyModule
 
 
 
+
     # Complete E-SINDy function 
-    function esindy(data, basis, n_bstrap=100; coef_threshold=15, data_fraction=1)
+    function esindy(data, basis, n_bstrap=100; coef_threshold=65, data_fraction=1)
     
     	# Run sindy bootstraps
     	bootstrap_res, hyperparameters = sindy_bootstrap(data, basis, n_bstrap, data_fraction)
+
+    	# Compute the masks
+    	masks = get_coef_mask(bootstrap_res)
     
     	# Compute the mean and std of ensemble coefficients
-    	e_coef, low_coef, up_coef = compute_coef_stat(bootstrap_res, coef_threshold)
+    	e_coef = compute_ecoef(bootstrap_res, coef_threshold)
     
     	# Build the final equation as callable functions
     	println("E-SINDy estimated equations:")
@@ -678,8 +765,7 @@ module ESINDyModule
             equations=y, 
             bootstraps=bootstrap_res, 
             coef_median=e_coef, 
-            coef_low=low_coef, 
-            coef_up=up_coef,
+            masks=masks,
             hyperparameters=hyperparameters)
     end
 end
