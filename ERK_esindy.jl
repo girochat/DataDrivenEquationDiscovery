@@ -19,7 +19,7 @@ begin
 	# External libraries
 	using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ColorSchemes, JLD2, ProgressLogging
 
-	# Packages under development
+	# Data Driven Equation Discovery packages
 	using DataDrivenDiffEq, DataDrivenSparse
 
 	# Import utils function
@@ -379,33 +379,36 @@ end
 
 # ╔═╡ aefb3b75-af6a-4bc9-98f8-713144b24c5a
 # Function to compute the interquartile range of the estimated equation
-function compute_CI(data, basis, masks)
-
-	freqs = Weights([mask.freq for mask in masks])
-
-	# Run MC simulations to estimate the distribution of estimated equations 
-	n_simulations = 1000
-	results = zeros(n_simulations, size(data.Y, 1), size(data.Y, 2))
+function compute_CI(data, basis, masks, ecoef_mask)
 	
-	for i in 1:n_simulations
-		current_coef = zeros(size(masks[1].coef_mean))
-		mask = sample(masks, freqs)
+	# Run MC simulations to estimate the distribution of estimated equations 
+	n_eqs = size(data.Y, 2)
+	n_simulations = 1000
+	results = zeros(n_simulations, size(data.Y, 1), n_eqs) 
+	for eq in 1:n_eqs
+
+		# Keep only mask that share coefficient with the median coefficient
+		up_masks = [mask for mask in masks[eq] if any(mask.mask .== ecoef_mask[eq:eq,:])]
+		freqs = Weights([mask.freq for mask in up_masks])
 		
-		# Build Normal distribution for non-zero coefficients
-		indices = findall(!iszero, mask.mask)
-		mask.coef_std[iszero.(mask.coef_std)] .= 1e-12
-		coef_distrib = [Normal(mask.coef_mean[k], mask.coef_std[k]) for k in indices]
-
-		# Samples coefficient from the distribution
-		coef_sample = [rand(distrib) for distrib in coef_distrib]
-		current_coef[indices] = coef_sample
-
-		# Calculate function value given sample of coef.
-		current_eqs = ESINDyModule.build_equations(current_coef, basis, verbose=false)
-		yvals = ESINDyModule.get_yvals(data, current_eqs)
-		n_eqs = length(current_eqs)
-		for eq in 1:n_eqs
-			results[i,:,eq] = yvals[eq]
+		for i in 1:n_simulations			
+			current_coef = zeros(size(up_masks[1].coef_mean))
+			mask = sample(up_masks, freqs)
+			current_mask = mask.mask .& ecoef_mask[eq:eq,:]
+			
+			# Build Normal distribution for non-zero coefficients
+			indices = findall(!iszero, current_mask)
+			mask.coef_std[iszero.(mask.coef_std)] .= 1e-12
+			coef_distrib = [Normal(mask.coef_mean[k], mask.coef_std[k]) for k in indices]
+	
+			# Samples coefficient from the distribution
+			coef_sample = [rand(distrib) for distrib in coef_distrib]
+			current_coef[indices] = coef_sample
+	
+			# Calculate function value given sample of coef.
+			current_eqs = ESINDyModule.build_equations(current_coef, basis, verbose=false)
+			yvals = ESINDyModule.get_yvals(data, current_eqs)
+			results[i,:,eq] = yvals[1]
 		end
 	end
 	iqr_low = mapslices(row -> percentile(filter(!isnan, row), 25), results, dims=1)
@@ -431,6 +434,13 @@ function plot_esindy(results; sample_idxs=nothing, iqr=true)
 	if isnothing(sample_idxs)
 		sample_idxs = 1:n_samples
 	end
+
+	# Compute interquartile range if necessary
+	ci_low, ci_up = nothing, nothing
+	if iqr
+		ecoef_mask = (!iszero).(coef_median)
+		ci_low, ci_up = compute_CI(data, basis, results.masks, ecoef_mask)
+	end
 	
 	# Plot results
 	n_eqs = size(eqs, 1)
@@ -438,12 +448,6 @@ function plot_esindy(results; sample_idxs=nothing, iqr=true)
 	palette = colorschemes[:seaborn_colorblind]
 	for eq in 1:n_eqs
 		
-		# Compute interquartile range if necessary
-		ci_low, ci_up = nothing, nothing
-		if iqr
-			ci_low, ci_up = compute_CI(data, basis, results.masks[eq])
-		end
-
 		i_color = 1
 		if n_eqs > 1
 			p = plot(title="Equation $(eq)", xlabel="Time t", ylabel="Equation y(t)")
@@ -557,13 +561,11 @@ md"""
 """
 
 # ╔═╡ 5c400147-353a-43f2-9de6-c234e13f06c9
-#=╠═╡
 begin
 	ngf_plot = plot_esindy(ngf_res, sample_idxs=1:8, iqr=false)[1]
 	plot(ngf_plot, title="E-SINDy results for ERK model\nafter NGF stimulation\n", size=(800, 600), legend_position=:topright)
 	#savefig("./Plots/ngf_esindy_100bt.svg")
 end
-  ╠═╡ =#
 
 # ╔═╡ de4c57fe-1a29-4354-a5fe-f4e184de4dd3
 begin
@@ -618,9 +620,14 @@ begin
 	egf_res_lib = load("./Data/egf_esindy_100bt_lib.jld2")["results"]
 end
 
+# ╔═╡ fdec1448-71eb-493e-9910-3596f1b72e42
+md"""
+###### Plot the results
+"""
+
 # ╔═╡ 664b3e67-09d3-4e98-a946-ffbcbed0fe90
 begin
-	egf_plot = plot_esindy(egf_res, iqr=false)[1]
+	egf_plot = plot_esindy(egf_res, iqr=true)[1]
 	plot(egf_plot, title="E-SINDy results for ERK model\nafter EGF stimulation\n", size=(800, 600), legend_position=:topright, ylim=(-0.05, .1))
 	#savefig("./Plots/egf_esindy_100bt.svg")
 end
@@ -634,12 +641,12 @@ end
 
 # ╔═╡ Cell order:
 # ╟─6024651c-85f6-4e53-be0f-44f658cf9c77
-# ╠═a806fdd2-5017-11ef-2351-dfc89f69b334
+# ╟─a806fdd2-5017-11ef-2351-dfc89f69b334
 # ╟─9ebfadf0-b711-46c0-b5a2-9729f9e042ee
 # ╟─d6b1570f-b98b-4a98-b5e5-9d747930a5ab
-# ╠═6c7929f5-15b2-4e19-8c26-e709f0da182e
-# ╠═d9b1a318-2c07-4d44-88ec-501b2cfc940b
-# ╠═c8841434-a7af-4ade-a444-e6bc47575811
+# ╟─6c7929f5-15b2-4e19-8c26-e709f0da182e
+# ╟─d9b1a318-2c07-4d44-88ec-501b2cfc940b
+# ╟─c8841434-a7af-4ade-a444-e6bc47575811
 # ╟─74ad0ae0-4406-4326-822a-8f3e027077b3
 # ╟─9dc0a251-a637-4144-b32a-7ebf5b86b6f3
 # ╟─0f5e0785-2778-4fde-b010-7fcf813ceed2
@@ -675,5 +682,6 @@ end
 # ╟─8f7e784d-1f35-49bf-ba73-d2306453e258
 # ╟─65732e07-69dd-43d5-b04c-72444c78c470
 # ╟─541c0d3f-d78e-49fd-b064-3b7fabc35d43
-# ╟─664b3e67-09d3-4e98-a946-ffbcbed0fe90
+# ╟─fdec1448-71eb-493e-9910-3596f1b72e42
+# ╠═664b3e67-09d3-4e98-a946-ffbcbed0fe90
 # ╟─2672fac7-df22-4445-887a-5404b74fc4b1
