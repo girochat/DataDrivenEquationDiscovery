@@ -38,7 +38,7 @@ https://github.com/user-attachments/assets/92347962-74a4-4503-8be7-606e066c8798
 
 &nbsp;
 
-For the second part, the function(s) represented by the neural network are fed into a SINDy-based algorithm to estimate the mathematical formula [1],[2]. The algorithm uses sparse regression to select the optimal terms and their coefficients ($\Xi$) among a library of simple functions ( $\Theta (X)$ ) to build the equation formula. Follow a schematic of SINDy algorithm where $Y=(Y_1, Y_2..Y_k)$ is the input data for which the equation is to be retrieved:
+For the second part, the function(s) represented by the neural network are fed into a SINDy-based algorithm to estimate the mathematical formula [4],[5]. The algorithm uses sparse regression to select the optimal terms and their coefficients ($\Xi$) among a library of simple functions ( $\Theta (X)$ ) to build the equation formula. Follow a schematic of SINDy algorithm where $Y=(Y_1, Y_2..Y_k)$ is the input data for which the equation is to be retrieved:
 
 <p align="center">
 <img width="871" alt="ude_optimisation" src="https://github.com/user-attachments/assets/0387759a-9272-4a3f-b983-694194b6fce3">
@@ -63,9 +63,16 @@ For each case interactive Pluto/Jupyter notebooks and Julia scripts are provided
 This repository contains three main directories:
 
 - **Code**:  
-  Pluto/Jupyter notebooks and Julia scripts.
-  There is a Pluto/Jupyter notebook for each model for the UDE approximation part: <model_name>_ude_approximation_pluto.jl or <model_name>_ude_approximation.ipynb).
-  Their Julia script version is also provided (<model_name>_ude_approximation.jl)
+  Pluto/Jupyter notebooks and Julia scripts.  
+  - UDE approximation:  
+       Pluto notebook: `<model_name>_ude_approximation_pluto.jl`  
+       Jupyter notebook: `<model_name>_ude_approximation.ipynb`  
+       Julia script: `<model_name>_ude_approximation.jl`
+   - E-SINDy:
+       Pluto notebook: `<model_name>_esindy_pluto.jl`  
+       Jupyter notebook: `<model_name>_esindy.ipynb`  
+       Julia script: `esindy.jl` and `esindy_utils.jl`  
+     
 - **Data**:  
   Final and intermediate results (CSV and JDL2 files) that were obtained for the two considered ODE systems, i.e. NFB and ERK model.
 - **Plots**:  
@@ -167,10 +174,11 @@ These libraries form the backbone of this data-driven modeling pipeline, enablin
 
 ## Additional Resources and References
 
-[1]   Rackauckas et al. (2021). "Universal Differential Equations for Scientific Machine Learning". [DOI](https://doi.org/10.48550/arxiv.2001.04385)  
-[2]   
-[3]   Brunton et al. (2016). "Discovering governing equations from data by sparse identification of nonlinear dynamical systems". [DOI](https://doi.org/10.1098/rspa.2021.0904)  
-[4]   Fasel et al. (2022). "Ensemble-SINDy: Robust sparse model discovery in the low-data, high-noise limit, with active learning and control". [DOI](https://doi.org/10.1098/rspa.2021.0904)  
+[1]   D. Daniels et al. (2015). Chapter 13: Parameter Estimation, Sloppiness, and Model Identifiability in "Quantitative Biology: Theory, Computational Methods and Examples of Models".  
+[2]   Ryu et al. (2015). "Frequency modulation of ERK activation dynamics rewires cell fate". [DOI](https://doi.org/10.15252/msb.20156458)  
+[3]   Rackauckas et al. (2021). "Universal Differential Equations for Scientific Machine Learning". [DOI](https://doi.org/10.48550/arxiv.2001.04385)     
+[4]   Brunton et al. (2016). "Discovering governing equations from data by sparse identification of nonlinear dynamical systems". [DOI](https://doi.org/10.1098/rspa.2021.0904)  
+[5]   Fasel et al. (2022). "Ensemble-SINDy: Robust sparse model discovery in the low-data, high-noise limit, with active learning and control". [DOI](https://doi.org/10.1098/rspa.2021.0904)  
   
 ## License
 This project is licensed under the terms of the [MIT license](LICENSE.txt).
