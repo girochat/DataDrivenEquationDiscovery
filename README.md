@@ -7,7 +7,7 @@ This project aims to estimate unknown parts of an ordinary differential equation
 
 To test the approach, two biological models were used to simulate data and build a UDE system out of their respective ODE system:
 - the Negative FeedBack (NFB) model presented in Chapter 13: Parameter Estimation, Sloppiness, and Model Identifiability by D. Daniels, M. Dobrzyński, D. Fey in "Quantitative Biology: Theory, Computational Methods and Examples of Models" (2018).
-- the ERK signalling (ERK) model presented by Ryu et al. in
+- the ERK signalling (ERK) model presented by Ryu et al. in "Frequency modulation of ERK activation dynamics rewires cell fate" (2015) [DOI](https://doi.org/10.15252/msb.20156458).
 
 Here are the schematics of the two models:
 
@@ -29,7 +29,16 @@ The parameters of the neural network are optimised while solving the ODE problem
 <img width="871" alt="ude_optimisation" src="https://github.com/user-attachments/assets/3699a7bc-8912-4f55-8d38-bc3912bebbc9">
 </p>
 
-For the second part, the function(s) represented by the neural network are fed into a SINDy-based algorithm to estimate the mathematical formula [1]. The algorithm uses sparse regression to select the optimal terms and their coefficients ($\Xi$) among a library of simple functions ( $\Theta (X)$ ) to build the equation formula. Follow a schematic of SINDy algorithm where $Y=(Y_1, Y_2..Y_k)$ is the input data for which the equation is to be retrieved:
+To better illustrate the process, here is an animation of the UDE optimisation for the NFB model in the negative feedback case "ab" with an 0.05M input stimulation. The left panel shows the ODE solution at the given iteration; the middle panel shows the data fitting of the second kinase (observed variable);
+the right panel shows the neural network output.
+
+&nbsp;
+
+https://github.com/user-attachments/assets/92347962-74a4-4503-8be7-606e066c8798
+
+&nbsp;
+
+For the second part, the function(s) represented by the neural network are fed into a SINDy-based algorithm to estimate the mathematical formula [4],[5]. The algorithm uses sparse regression to select the optimal terms and their coefficients ($\Xi$) among a library of simple functions ( $\Theta (X)$ ) to build the equation formula. Follow a schematic of SINDy algorithm where $Y=(Y_1, Y_2..Y_k)$ is the input data for which the equation is to be retrieved:
 
 <p align="center">
 <img width="871" alt="ude_optimisation" src="https://github.com/user-attachments/assets/0387759a-9272-4a3f-b983-694194b6fce3">
@@ -54,7 +63,16 @@ For each case interactive Pluto/Jupyter notebooks and Julia scripts are provided
 This repository contains three main directories:
 
 - **Code**:  
-  Pluto/Jupyter notebooks and Julia scripts.
+  Pluto/Jupyter notebooks and Julia scripts.  
+  - UDE approximation:  
+       Pluto notebook: `<model_name>_ude_approximation_pluto.jl`  
+       Jupyter notebook: `<model_name>_ude_approximation.ipynb`  
+       Julia script: `<model_name>_ude_approximation.jl`
+   - E-SINDy:
+       Pluto notebook: `<model_name>_esindy_pluto.jl`  
+       Jupyter notebook: `<model_name>_esindy.ipynb`  
+       Julia script: `esindy.jl` and `esindy_utils.jl`  
+     
 - **Data**:  
   Final and intermediate results (CSV and JDL2 files) that were obtained for the two considered ODE systems, i.e. NFB and ERK model.
 - **Plots**:  
@@ -69,12 +87,12 @@ To run the code in this repository, you need to have Julia installed which can b
 
 Clone this repository to your local machine.
 
-git clone https://github.com/girochat/DataDrivenEquationDiscovery.git
+      git clone https://github.com/girochat/DataDrivenEquationDiscovery.git
 
 #### Install Dependencies
 For reproducibility, it is recommended to use the directory of the project as a Julia environment: 
-1. Go to the directory:  
-   `cd /your_path_to_the_repo/DataDrivenEquationDiscovery`
+1. Go to the **Code** directory of the repository:  
+   `cd /your_path_to_the_repo/DataDrivenEquationDiscovery/Code`
 2. Open Julia and open the REPL by pressing ']'  
 3. In the REPL, activate the local environment and instantiate the packages:  
    `pkg> activate .`  
@@ -97,25 +115,39 @@ If you prefer using Jupyter Notebook, the Jupyter version of the Pluto notebooks
 #### Julia Scripts  
 
 ##### 1. Run UDE approximation script
-The UDE scripts are specific to the ODE model considered and take some file argument.   
+The UDE scripts are specific to the ODE model considered and take some file argument. Make sure to be in the `Code/` folder before running the command or replace the dot in `--project=.` by the relative/absolute path to the `Code/` directory. 
+
+&nbsp;
+
 To run the NFB model UDE approximation script:
 
-    julia --project=. NFB_ude_approximation_script.jl <NFB model type (no/a/b/ab)> <input concentration> <save parameters (y/n)> <load parameters (y/n)>
+    julia --project=. NFB_ude_approximation.jl \
+    <NFB model type (no/a/b/ab)> \
+    <input concentration> \
+    <save parameters (y/n)> \
+    <load parameters (y/n)> \
 
 To run the ERK model UDE approximation script:
 
-    julia --project=. ERK_ude_approximation_script.jl <Growth factor type (EGF/NGF)> <Type of input concentration (high/low)> <pulse duration> <pulse frequency>
-    <save parameters (y/n)> <load parameters (y/n)>
+    julia --project=. ERK_ude_approximation.jl \
+    <Growth factor type (EGF/NGF)> \ 
+    <Type of input concentration (high/low)> \
+    <pulse duration> \
+    <pulse frequency> \
+    <save parameters (y/n)> \
+    <load parameters (y/n)> \
     
 
 ##### 2. Run E-SINDy script
 
 Any output obtained with the UDE approximation scripts (CSV format) can be used to run the E-SINDy script. It also takes file arguments:
 
-    julia --project=. esindy_script.jl <model type (NFB/ERK)> <Number of bootstraps> <Coefficient threshold> <Output filename> <List of CSV files>
-
-## Examples
-In this section is provided an example of the output and plots after running the method on a specific case of the NFB model. 
+    julia --project=. esindy.jl \
+    <model type (NFB/ERK)> \
+    <Number of bootstraps> \
+    <Coefficient threshold> \
+    <Output filename> \
+    <List of CSV files> \
 
 ## Dependencies and Key Libraries
 This project relies on several important Julia packages for data-driven modeling and differential equations:
@@ -142,10 +174,11 @@ These libraries form the backbone of this data-driven modeling pipeline, enablin
 
 ## Additional Resources and References
 
-[1]   Brunton et al. (2016). "Discovering governing equations from data by sparse identification of nonlinear dynamical systems". [DOI](https://doi.org/10.1098/rspa.2021.0904)"  
-[2]   
-
-    models reference
-
+[1]   D. Daniels et al. (2015). Chapter 13: Parameter Estimation, Sloppiness, and Model Identifiability in "Quantitative Biology: Theory, Computational Methods and Examples of Models".  
+[2]   Ryu et al. (2015). "Frequency modulation of ERK activation dynamics rewires cell fate". [DOI](https://doi.org/10.15252/msb.20156458)  
+[3]   Rackauckas et al. (2021). "Universal Differential Equations for Scientific Machine Learning". [DOI](https://doi.org/10.48550/arxiv.2001.04385)     
+[4]   Brunton et al. (2016). "Discovering governing equations from data by sparse identification of nonlinear dynamical systems". [DOI](https://doi.org/10.1098/rspa.2021.0904)  
+[5]   Fasel et al. (2022). "Ensemble-SINDy: Robust sparse model discovery in the low-data, high-noise limit, with active learning and control". [DOI](https://doi.org/10.1098/rspa.2021.0904)  
+  
 ## License
 This project is licensed under the terms of the [MIT license](LICENSE.txt).
