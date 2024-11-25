@@ -52,7 +52,11 @@ end
 
 
 ##### Import the data #####
-data = create_data(files, smoothing=300., var_idxs=1:5)
+if lowercase(model) == "erk"
+    data = create_data(files, smoothing=300., var_idxs=1:5)  # for ERK
+else
+    data = create_data(files, smoothing=300.)  # for NFB
+end
 
 
 ##### Set up the SINDy library #####
@@ -77,7 +81,7 @@ esindy_res = esindy(data, basis, n_bstraps, coef_threshold=coef_threshold, data_
 
 
 ##### Save results #####
-println("Saving results to ./Data/$(filename).jld2.")
-jldsave("./Data/$(filename).jld2"; results=esindy_res)
+println("Saving results to ../Data/$(filename).jld2.")
+jldsave("../Data/$(filename).jld2"; results=esindy_res)
 
 

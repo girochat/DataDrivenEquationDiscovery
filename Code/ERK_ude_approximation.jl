@@ -339,7 +339,7 @@ df = DataFrame((
     ERK_GT=X[5,:],
     NFB_GT=X[6,:],
     PFB_GT=X[7,:]))
-#CSV.write("./Data/$(filename).csv", df, header=true)
+#CSV.write("../Data/$(filename).csv", df, header=true)
 
 
 
@@ -357,7 +357,7 @@ plot!(p2, X.t, u, linewidth=2, label="Ground truth", legend_position=:bottomrigh
 
 # Final two panels plot
 nn_plot = plot(p1, p2, layout=(2,1), size=(600, 800))
-#savefig(nn_plot, "./Plots/$(filename)_nn_plot.svg")
+#savefig(nn_plot, "../Plots/$(filename)_nn_plot.svg")
 
 
 
@@ -385,4 +385,4 @@ plot!(X.t, X[7,:], label="Ground truth", colour=:black, linewidth=2, linestyle=:
 
 # Final multipanel plot
 full_plot = plot(R_plot, Ras_plot, Raf_plot, MEK_plot, NFB_plot, PFB_plot, layout=(3,2), size=(800, 1000))
-#savefig(full_plot, "./Plots/$(filename)_full_plot.svg")
+#savefig(full_plot, "../Plots/$(filename)_full_plot.svg")

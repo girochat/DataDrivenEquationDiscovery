@@ -134,10 +134,14 @@ module NFBModule
     	labels = []
     	case = ""
     	for file in files
-    		words = split(file, ".")
+            words = split(file, "/")
+    		words = split(words[end], ".")
+            @info words
     		words = split(words[1], "_")
+            @info words
     		label = "Input CC 0."
     		for word in words
+                @info word
     			if occursin("a", word) || occursin("b", word) || occursin("no", word)
     				case = word
     			elseif isdigit(word[1]) 
@@ -151,7 +155,7 @@ module NFBModule
 
     
     # Create E-SINDy compatible data structure out of dataframes
-    function create_data(files, smoothing=0.)
+    function create_data(files; smoothing=0.)
     
     	# Load data into dataframe
     	df = CSV.read(files[1], DataFrame)
@@ -355,7 +359,7 @@ module ESINDyModule
     				simpl_coefs = simplify_expression(best_res.out[1].coefficients[1,:], basis)
     				
     				# Store library coefficient for current bootstrap
-    				bootstrap_coef[i,eq,:] = simpl_coefs
+    				bootstrap_coef[j,eq,:] = simpl_coefs
     			end
     		else
     			dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(X', Y')
@@ -367,7 +371,7 @@ module ESINDyModule
     			best_res = DataDrivenDiffEq.solve(dd_prob, basis, DataDrivenSparse.SR3(best_λ, best_ν), 
                 options = options)
     			
-    			# Store library coefficient for current bootstrap
+    			# Store coefficient for current bootstrap
     			bootstrap_coef[j,:,:] = best_res.out[1].coefficients
     		end
 

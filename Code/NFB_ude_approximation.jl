@@ -29,12 +29,12 @@ else
     type_NFB = lowercase(ARGS[1])
     input_CC = parse(Float64, ARGS[2])
     if lowercase(ARGS[3][1]) == "y"
-        save_file = "./Data/nfb_nn_param_$(type_NFB).jld2" 
+        save_file = "../Data/nfb_nn_param_$(type_NFB).jld2" 
     else
         save_file = nothing
     end
     if lowercase(ARGS[4][1]) == "y"
-        retrain_file = "./Data/nfb_nn_param_$(type_NFB).jld2" 
+        retrain_file = "../Data/nfb_nn_param_$(type_NFB).jld2" 
     else
         retrain_file = nothing
     end
@@ -242,7 +242,7 @@ df = DataFrame((
     g2p_GT=X[2,:],
     Xact_GT=X[3,:],
     ))
-CSV.write("./Data/$(filename).csv", df, header=true)
+CSV.write("../Data/$(filename).csv", df, header=true)
 
 
 
@@ -254,7 +254,7 @@ CSV.write("./Data/$(filename).csv", df, header=true)
 data_plot = plot(ts, X̂[2,:], xlabel = "Time", ylabel = "x(t)", color = :black, label = "g2p Approximation", linewidth=2, title="g2p fitting")
 plot!(data_plot, X, alpha = 0.75, color = :blue, label = "g2p GT", idxs=2)
 scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "g2p Noisy data")
-#savefig(data_plot, "./Plots/$(filename)_data_plot.svg")
+#savefig(data_plot, "../Plots/$(filename)_data_plot.svg")
 
 # Plot NN results
 nn_plot = plot(ts, û[1,:], label="Û₁ approximated by NN", colour=:blue, title="NN approximation")
@@ -271,7 +271,7 @@ elseif type_NFB == "b"
 elseif type_NFB == "ab"
     plot!(nn_plot, ts, X[3,:], label="U₁ and U₂ Ground truth", colour=:black, linestyle=:dash)
 end
-#savefig(nn_plot, "./Plots/$(filename)_nn_plot.svg")
+#savefig(nn_plot, "../Plots/$(filename)_nn_plot.svg")
 
 # Compare predicted state variables with their respective ground truth
 full_plot = plot(ts, X̂[1,:], label="Predicted g1p", colour=:green, linewidth=2, title="Full model prediction")
@@ -280,5 +280,5 @@ plot!(full_plot, ts, X̂[2,:], label="Predicted g2p", colour=:blue, linewidth=2)
 plot!(full_plot, X.t, X[2,:], label="Ground truth g2p", linestyle=:dash, colour=:steelblue, linewidth=2)
 plot!(full_plot, ts, X̂[3,:], label="Predicted Xact", colour=:red, linewidth=2)
 plot!(full_plot, X.t, X[3,:], label="Ground truth Xact", colour=:pink, linewidth=2, linestyle=:dash)
-#savefig(full_plot, "./Plots/$(filename)_full_plot.svg")
+#savefig(full_plot, "../Plots/$(filename)_full_plot.svg")
 
