@@ -247,12 +247,13 @@ module ESINDyModule
     abstol=1e-10, reltol=1e-10, denoise=true)
 
 
-
+    # Flush stdout
     function print_flush(message)
         println(message)
         flush(stdout)
     end
     
+
 
 
     # Objective function for hyperparameter optimisation
@@ -273,7 +274,8 @@ module ESINDyModule
     	end
     	return bic(res_dd)
     end
-    
+
+
    
  
     # Hyperparameter optimisation function
@@ -285,12 +287,14 @@ module ESINDyModule
     		sampler=HyperTuning.RandomSampler())
     
     	# Find optimal hyperparameters
-    	hp_res = HyperTuning.optimize(trial -> objective(trial, dd_prob, basis, with_implicits), scenario)
+    	hp_res = HyperTuning.optimize(trial -> objective(trial, dd_prob, basis, with_implicits), 
+        scenario)
     
     	return hp_res.best_trial.values[:λ], hp_res.best_trial.values[:ν]
     end
     
-    
+
+
     
     # Bootstrapping function that estimate optimal library coefficients given data
     function sindy_bootstrap(data, basis, n_bstraps, data_fraction)
@@ -379,8 +383,10 @@ module ESINDyModule
 
 
 
+
     # Bootstrapping function that estimate optimal library terms given data
-    function library_bootstrap(data, basis, n_bstraps, n_libterms; implicit_id=none)
+    function library_bootstrap(data, basis, n_bstraps, n_libterms; implicit_id=none,
+    hyperparameters=nothing)
     
     	# Initialise the coefficient array
     	n_eqs = size(data.Y, 2)
@@ -390,19 +396,19 @@ module ESINDyModule
     	best_bic = 1000
 
         # Track progress while using parallelisation
-        progress = [] 
+        progress = []
+
+        # Check if the problem involves implicits
+        implicits = implicit_variables(basis)
+        with_implicits = false
     
     	print_flush("Starting Library E-SINDy Bootstrapping:")
     	Threads.@threads for j in 1:n_bstraps
-    		for eq in 1:n_eqs
+            for eq in 1:n_eqs
 
                 if n_eqs > 1 && j == 1
                     print_flush("Equation $(eq):")
                 end
-    		
-    			# Check if the problem involves implicits
-    			implicits = implicit_variables(basis)
-    			with_implicits = false
     
     			# Create bootstrap library basis
     			if !isempty(implicits)
@@ -418,7 +424,11 @@ module ESINDyModule
     	
     			# Solve data-driven problem with optimal hyperparameters
     			dd_prob = DataDrivenDiffEq.DirectDataDrivenProblem(data.X', data.Y[:,eq]')
-    			best_λ, best_ν = get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
+    			if !isnothing(hyperparameters)
+    				best_λ, best_ν = hyperparameters
+    			else
+    				best_λ, best_ν = get_best_hyperparameters(dd_prob, bt_basis, with_implicits)
+    			end
     			if with_implicits
     				best_res = DataDrivenDiffEq.solve(dd_prob, bt_basis, 
                     ImplicitOptimizer(DataDrivenSparse.SR3(best_λ, best_ν)), options=options)
@@ -427,16 +437,17 @@ module ESINDyModule
                     DataDrivenSparse.SR3(best_λ, best_ν), options = options)
     			end
     
-    			# Check if bootstrap basis is optimal
+                # Check if bootstrap basis is optimal
     			bt_bic = bic(best_res)
     			if bt_bic < best_bic
     				best_bic = bt_bic
-    				bootstrap_coef[indices,eq,:] = zeros(length(indices),1,l_basis)
-    				bootstrap_coef[j,eq,rand_ind] = best_res.out[1].coefficients
+    				bootstrap_coef[indices,eq:eq,:] = zeros((length(indices),1,l_basis))
+    				bootstrap_coef[j,eq:eq,rand_ind] = best_res.out[1].coefficients
     				empty!(indices)
     				push!(indices, j)
     			elseif bt_bic == best_bic
-    				bootstrap_coef[j,eq,rand_ind] = best_res.out[1].coefficients
+    				bootstrap_coef[j,eq:eq,rand_ind] = best_res.out[1].coefficients
+    				push!(indices, j)
     			end
 
                 # Print progress 
@@ -448,6 +459,7 @@ module ESINDyModule
     	end
     	return bootstrap_coef 
     end
+
 
 
 
@@ -489,6 +501,7 @@ module ESINDyModule
 
 
 
+
     
     # Function to estimate coefficient statistics
     function compute_ecoef(bootstrap_res, coef_threshold)
@@ -521,6 +534,7 @@ module ESINDyModule
 
 
 
+
     # Function to identify the candidate equations returned during E-SINDy
     function get_coef_mask(bootstraps)
     	
@@ -540,7 +554,8 @@ module ESINDyModule
     			if mask in mask_set
     				nothing
     			else
-    				# Compute the frequency of current mask
+    				
+                    # Compute the frequency of current mask
     				push!(mask_set, mask)
     				freq = 0
     				coefs = []
@@ -570,6 +585,7 @@ module ESINDyModule
 
 
 
+
     # Function to build the reduced basis based on Library E-SINDy results
     function build_basis(lib_bootstraps, basis)
 
@@ -581,6 +597,7 @@ module ESINDyModule
     	lib_basis = DataDrivenDiffEq.Basis(basis[lib_ind], x, implicits=i[1:1])
     	return lib_basis
     end
+
 
 
 
@@ -638,81 +655,85 @@ module ESINDyModule
 
 
     # Function to compute the interquartile range of the estimated equation
-    function compute_CI(data, basis, masks)
-    
-    	freqs = Weights([mask.freq for mask in masks])
-    
-    	# Run MC simulations to estimate the distribution of estimated equations 
-    	n_simulations = 1000
-    	results = zeros(n_simulations, size(data.Y, 1), size(data.Y, 2))
+    function compute_CI(data, basis, masks, ecoef_mask)
     	
-    	for i in 1:n_simulations
-    		current_coef = zeros(size(masks[1].coef_mean))
-    		mask = sample(masks, freqs)
+    	# Run MC simulations to estimate the distribution of estimated equations 
+    	n_eqs = size(data.Y, 2)
+    	n_simulations = 1000
+    	results = zeros(n_simulations, size(data.Y, 1), n_eqs) 
+    	for eq in 1:n_eqs
     		
-    		# Build Normal distribution for non-zero coefficients
-    		indices = findall(!iszero, mask.mask)
-    		mask.coef_std[iszero.(mask.coef_std)] .= 1e-12
-    		coef_distrib = [Normal(mask.coef_mean[k], mask.coef_std[k]) for k in indices]
-    
-    		# Samples coefficient from the distribution
-    		coef_sample = [rand(distrib) for distrib in coef_distrib]
-    		current_coef[indices] = coef_sample
-    
-    		# Calculate function value given sample of coef.
-    		current_eqs = build_equations(current_coef, basis, verbose=false)
-    		yvals = ESINDyModule.get_yvals(data, current_eqs)
-    		n_eqs = length(current_eqs)
-    		for eq in 1:n_eqs
-    			results[i,:,eq] = yvals[eq]
+            # Keep only mask that share coefficient with the median coefficient
+    		up_masks = [mask for mask in masks[eq] if any(mask.mask .== ecoef_mask[eq:eq,:])]
+    		freqs = Weights([mask.freq for mask in up_masks])
+    		
+    		for i in 1:n_simulations			
+    			current_coef = zeros(size(up_masks[1].coef_mean))
+    			mask = sample(up_masks, freqs)
+    			current_mask = mask.mask .& ecoef_mask[eq:eq,:]
+    			
+    			# Build Normal distribution for non-zero coefficients
+    			indices = findall(!iszero, current_mask)
+    			mask.coef_std[iszero.(mask.coef_std)] .= 1e-12
+    			coef_distrib = [Normal(mask.coef_mean[k], mask.coef_std[k]) for k in indices]
+    	
+    			# Samples coefficient from the distribution
+    			coef_sample = [rand(distrib) for distrib in coef_distrib]
+    			current_coef[indices] = coef_sample
+    	
+    			# Calculate function value given sample of coef.
+    			current_eqs = ESINDyModule.build_equations(current_coef, basis, verbose=false)
+    			yvals = ESINDyModule.get_yvals(data, current_eqs)
+    			results[i,:,eq] = yvals[1]
     		end
     	end
     	iqr_low = mapslices(row -> percentile(filter(!isnan, row), 25), results, dims=1)
     	iqr_up = mapslices(row -> percentile(filter(!isnan, row), 75), results, dims=1)
-    
         return (iqr_low=iqr_low[1,:,:], iqr_up=iqr_up[1,:,:])
     end
 
 
 
 
+
     # Plotting function for E-SINDy results
     function plot_esindy(results; sample_idxs=nothing, iqr=true)
-    
-    	# Retrieve results
+    	
+        # Retrieve results
     	data, basis = results.data, results.basis
     	coef_median = results.coef_median
-    	eqs = build_equations(coef_median, basis, verbose=false)
-    	y_vals = get_yvals(data, eqs)
-    
-    	# Retrieve the number of samples
+    	
+    	eqs = ESINDyModule.build_equations(coef_median, basis, verbose=false)
+    	y_vals = ESINDyModule.get_yvals(data, eqs)
+    	
+        # Retrieve the indices of samples to plot
     	n_samples = sum(data.time .== 0)
     	size_sample = Int(length(data.time) / n_samples)
     	if isnothing(sample_idxs)
     		sample_idxs = 1:n_samples
     	end
-    
+    	
+        # Compute interquartile range if necessary
+    	ci_low, ci_up = nothing, nothing
+    	if iqr
+    		ecoef_mask = (!iszero).(coef_median)
+    		ci_low, ci_up = compute_CI(data, basis, results.masks, ecoef_mask)
+    	end
     	
     	# Plot results
     	n_eqs = size(eqs, 1)
     	subplots = []
-    	palette = colorschemes[:seaborn_colorblind] 
+    	palette = colorschemes[:seaborn_colorblind]
     	for eq in 1:n_eqs
-
-            # Compute interquartile range if necessary
-        	ci_low, ci_up = nothing, nothing
-        	if iqr
-        		ci_low, ci_up = compute_CI(data, basis, results.masks[eq])
-        	end
-            
-            i_color = 1
+    		
+    		i_color = 1
     		if n_eqs > 1
     			p = plot(title="Equation $(eq)", xlabel="Time t", ylabel="Equation y(t)")
     		else
     			p = plot(title="", xlabel="Time", ylabel="Equation y(t)")
     		end
-    
-    		# Plot each sample separately
+    		
+            # Plot each sample separately
     		for sample in 0:(n_samples-1)
     			if (sample+1) in sample_idxs
     				i_start = 1 + sample * size_sample
@@ -720,20 +741,15 @@ module ESINDyModule
     				
     				y = y_vals[eq][i_start:i_end] 
     				if iqr
-    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], 
-                        color=palette[i_color],
-    					ribbon=(y - ci_low[i_start:i_end, eq], ci_up[i_start:i_end, eq] - y), 
-                        fillalpha=0.15)
+    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], color=palette[i_color],
+    					ribbon=(y - ci_low[i_start:i_end, eq], ci_up[i_start:i_end, eq] - y), fillalpha=0.15)
     				else
-    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], 
-                        color=palette[i_color])
+    					plot!(p, data.time[i_start:i_end], y, label=data.labels[sample+1], color=palette[i_color])
     				end
     				
-    				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end, eq], label="", 
-                    linestyle=:dash, color=palette[i_color])
-                    i_color = i_color + 1
+    				plot!(p, data.time[i_start:i_end], data.GT[i_start:i_end, eq], label="", linestyle=:dash, color=palette[i_color])
+    				i_color = i_color + 1
     			end
-                
     		end
     		plot!(p, [], [],  label="GT", color=:black, linestyle=:dash)
     		push!(subplots, p)

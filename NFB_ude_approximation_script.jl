@@ -1,11 +1,11 @@
 # SciML tools
-import OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches #DataDrivenDiffEq, DataDrivenSparse,
+import OrdinaryDiffEq, ModelingToolkit, SciMLSensitivity, Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
 
 # Standard libraries
 using Statistics, Plots, CSV, DataFrames, ComponentArrays
 
 # External libraries
-using Lux, Zygote, StableRNGs # LuxCUDA
+using Lux, Zygote, StableRNGs
 
 # Set a random seed for reproducibility
 rng = StableRNG(1111)
@@ -19,13 +19,25 @@ gr()
 ##### USER-DEFINED parameters #####
 
 # Retrieve file arguments
-if length(ARGS) < 2
+if length(ARGS) < 4
     error("Error! You need to specify as arguments:\n
         - Type of NFB (no/a/b/ab)\n
-        - Input concentration\n")
+        - Input concentration\n
+        - If saving neural network parameters (y/n)
+        - If reusing neural network parameters (y/n)")
 else
     type_NFB = lowercase(ARGS[1])
     input_CC = parse(Float64, ARGS[2])
+    if lowercase(ARGS[3][1]) == "y"
+        save_file = "./Data/nfb_nn_param_$(type_NFB).jld2" 
+    else
+        save_file = nothing
+    end
+    if lowercase(ARGS[4][1]) == "y"
+        retrain_file = "./Data/nfb_nn_param_$(type_NFB).jld2" 
+    else
+        retrain_file = nothing
+    end
     println("Running UDE approximation for case $(type_NFB) with input concentration $(string(input_CC)).")
     flush(stdout)
 end
@@ -95,9 +107,6 @@ x̄_g2p = mean(x_g2p, dims = 1)
 noise_magnitude = 5e-3
 xₙ_g2p = abs.(x_g2p .+ (noise_magnitude * x̄_g2p) .* randn(rng, eltype(x_g2p), size(x_g2p)))
 
-#data_plot = plot(X, alpha = 0.75, color = :blue, 
-#    label = string(type_NFB, " Ground truth"), idxs=2, title="g2p simulated data")
-#scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "Noisy Data", idxs=4)
 
 
 
@@ -105,13 +114,20 @@ xₙ_g2p = abs.(x_g2p .+ (noise_magnitude * x̄_g2p) .* randn(rng, eltype(x_g2p)
 ##### Solve UDE #####
 
 # Define a Multilayer FeedForward with Lux.jl
-rbf(x) = exp.(-(x .^ 2))
-const U = Lux.Chain(Lux.Dense(3, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 10, tanh), Lux.Dense(10, 2, softplus))
+const U = Lux.Chain(Lux.Dense(3, 10, gelu), Lux.Dense(10, 10, gelu), Lux.Dense(10, 10, gelu), Lux.Dense(10, 10, gelu), Lux.Dense(10, 2)) 
+#const U = Lux.Chain(Lux.Dense(3, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 2))
 
-# Get the initial parameters and state variables of the model
-p, st = Lux.setup(rng, U)
-const _st = st
-
+if !isnothing(retrain_file)
+		
+    # Load pre-trained NN parameters
+    architecture = load(retrain_file)["architecture"]
+    p = architecture.p
+    const _st = architecture.st
+else
+    # Get the initial parameters and state variables of the model
+    p, st = Lux.setup(rng, U)
+    const _st = st
+end
 
 # Define the hybrid model
 function ode_discovery!(du, u, p, t, p_true)
@@ -181,22 +197,58 @@ if !isempty(losses)
 end
 
 # Solve UDE first by running Adam optimizer
-res1 = Optimization.solve(optprob1, OptimizationOptimisers.Adam(), callback = callback, maxiters = 5000)
+res1 = Optimization.solve(optprob1, OptimizationOptimisers.Adam(), callback = callback, maxiters = 500)
 println("Training loss after $(length(losses)) iterations: $(losses[end])")
 
 # Finish solving UDE by running LBFGS optimizer
 optprob2 = Optimization.OptimizationProblem(optf, res1.u)
-res2 = Optimization.solve(optprob2, OptimizationOptimJL.LBFGS(linesearch = LineSearches.BackTracking()), callback = callback, maxiters = 5000)
+res2 = Optimization.solve(optprob2, OptimizationOptimJL.LBFGS(linesearch = LineSearches.BackTracking()), callback = callback, maxiters = 2000)
 println("Final training loss after $(length(losses)) iterations: $(losses[end])")
 flush(stdout)
 
 
-##### Visualise results #####
+
+
+##### Save results #####
+
+# Save the parameters
+if !isnothing(save_file)
+	jldsave(save_file; architecture = (p=res2.u, st=_st))
+end
 
 # Retrieve the trained parameters and get NFB model estimations
 p_trained = res2.u
 ts = first(X.t):(mean(diff(X.t))):last(X.t) 
 X̂ = predict(p_trained, ts)
+
+# Compare unknown part approximated by NN with ground truth
+û = U(X̂, p_trained, _st)[1]
+
+# Save NN approximation with the fitted and GT ODE solution for equation discovery
+g2p_data = zeros(length(X[1,:]))
+time_data = zeros(length(X[1,:]))
+g2p_data[begin:length(xₙ_g2p)] = xₙ_g2p
+time_data[begin:length(time)] = time
+df = DataFrame((
+    time=X.t,
+    t_data=time_data,
+    g2p_data=g2p_data,
+    NN1=û[1,:],
+    NN2=û[2,:],
+    g1p_fit=X̂[1,:],
+    g2p_fit=X̂[2,:],
+    Xact_fit=X̂[3,:],
+    g1p_GT=X[1,:],
+    g2p_GT=X[2,:],
+    Xact_GT=X[3,:],
+    ))
+CSV.write("./Data/$(filename).csv", df, header=true)
+
+
+
+
+
+##### Visualise results #####
 
 # Trained on noisy data vs real solution
 data_plot = plot(ts, X̂[2,:], xlabel = "Time", ylabel = "x(t)", color = :black, label = "g2p Approximation", linewidth=2, title="g2p fitting")
@@ -204,8 +256,7 @@ plot!(data_plot, X, alpha = 0.75, color = :blue, label = "g2p GT", idxs=2)
 scatter!(data_plot, time, xₙ_g2p, color = :blue, label = "g2p Noisy data")
 #savefig(data_plot, "./Plots/$(filename)_data_plot.svg")
 
-# Compare unknown part approximated by NN with ground truth
-û = U(X̂, p_trained, _st)[1]
+# Plot NN results
 nn_plot = plot(ts, û[1,:], label="Û₁ approximated by NN", colour=:blue, title="NN approximation")
 plot!(nn_plot, ts, û[2,:], label="Û₂ approximated by NN", colour=:green)
 
@@ -230,29 +281,4 @@ plot!(full_plot, X.t, X[2,:], label="Ground truth g2p", linestyle=:dash, colour=
 plot!(full_plot, ts, X̂[3,:], label="Predicted Xact", colour=:red, linewidth=2)
 plot!(full_plot, X.t, X[3,:], label="Ground truth Xact", colour=:pink, linewidth=2, linestyle=:dash)
 #savefig(full_plot, "./Plots/$(filename)_full_plot.svg")
-
-
-
-
-##### Save results #####
-
-# Save NN approximation with the fitted and GT ODE solution for equation discovery
-g2p_data = zeros(length(X[1,:]))
-time_data = zeros(length(X[1,:]))
-g2p_data[begin:length(xₙ_g2p)] = xₙ_g2p
-time_data[begin:length(time)] = time
-df = DataFrame((
-    time=X.t,
-    t_data=time_data,
-    g2p_data=g2p_data,
-    NN1=û[1,:],
-    NN2=û[2,:],
-    g1p_fit=X̂[1,:],
-    g2p_fit=X̂[2,:],
-    Xact_fit=X̂[3,:],
-    g1p_GT=X[1,:],
-    g2p_GT=X[2,:],
-    Xact_GT=X[3,:],
-    ))
-CSV.write("./Data/$(filename).csv", df, header=true)
 

@@ -23,18 +23,30 @@ gr()
 ### USER-DEFINED parameters (pulse duration, frequency, GF concentration)
 
 # Retrieve file arguments
-if length(ARGS) < 4
+if length(ARGS) < 6
     error("Error! You need to specify as arguments: \n
         - Type of growth factor (EGF/NGF)\n
         - Type of input concentration (high/low)\n
         - Pulse duration\n
-        - Pulse frequency (Note: enter 100 for only one pulse)")
+        - Pulse frequency (Note: enter 100 for only one pulse)
+        - If saving neural network parameters (y/n)
+        - If reusing neural network parameters (y/n)")
 else
     print("Running UDE approximation for ")
     GF = uppercase(ARGS[1]) 
     CC = lowercase(ARGS[2])
     pulse_duration = parse(Int, ARGS[3])
     pulse_frequency = parse(Int, ARGS[4])
+    if lowercase(ARGS[5][1]) == "y"
+        save_file = "./Data/$(GF)_nn_param.jld2" 
+    else
+        save_file = nothing
+    end
+    if lowercase(ARGS[6][1]) == "y"
+        retrain_file = "./Data/$(GF)_nn_param.jld2" 
+    else
+        retrain_file = nothing
+    end
 
     # Name output file to save the results according to parameters used
     if pulse_frequency < 100
@@ -160,18 +172,23 @@ scatter!(time, xₙ_ERK, color = :blue, label = "ERK Noisy Data", idxs=4)
 
 ##### Solve UDE #####
 
-#rbf(x) = exp.(-(x .^ 2))
+
 
 # Multilayer FeedForward
 const U = Lux.Chain(Lux.Dense(7, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 25, RBF.rbf), Lux.Dense(25, 1))
 
-# Get the initial parameters and state variables of the model
-#p, st = Lux.setup(rng, U)
-#const _st = st
+if !isnothing(retrain_file)
+    
+    # Load pre-trained NN parameters
+    architecture = load(retrain_file)["architecture"]
+    p = architecture.p
+    const _st = architecture.st
+else
+    # Get the initial parameters and state variables of the model
+    p, st = Lux.setup(rng, U)
+    const _st = st
+end
 
-nn_architecture = load("./Data/$(GF)_nn_param.jld2")["architecture"]
-p = nn_architecture.p
-const _st = nn_architecture.st
 
 # Define the hybrid model
 function ode_discovery!(du, u, p, t, p_true)
@@ -200,8 +217,6 @@ function ode_discovery!(du, u, p, t, p_true)
 	du[3] = (k1_Raf * u[2] * ((1-u[3]) / (Km_Raf + (1-u[3]))) * 
 	        ((K_NFB)^2 / (K_NFB^2 + u[6]^2)) - 
 	         (kd_Raf * P_Raf * u[3] / (Km_aRaf + u[3])) + û[1])
-	         
-			 #k2_Raf * u[7] * (1-u[3]) / (K_PFB + (1-u[3])))
 
 	# MEK equation
 	du[4] = (k_MEK * u[3] * (1-u[4]) / (Km_MEK + (1-u[4])) - 
@@ -280,66 +295,24 @@ println("Final training loss after $(length(losses)) iterations: $(losses[end])"
 flush(stdout)
 
 
-##### Visualise results #####
+##### Save results #####
+
+# Save the parameters
+if !isnothing(save_file)
+	jldsave(save_file; architecture = (p=res2.u, st=architecture.st))
+end
+
 
 # Retrieve the trained parameters and get EGF/NGF model estimations
 p_trained = res2.u
 ts = first(X.t):(mean(diff(X.t))):last(X.t)
 X̂ = predict(p_trained, ts)
 
-# Save/update neural network parameters
-jldsave("./Data/$(GF)_nn_param.jld2"; architecture=(p=p_trained, st=_st))
-
 # Estimate UDE unknown part
 û = U(X̂, p_trained, _st)[1]
 
 # Establish ground truth for unkown part of ODE system
 u = (p_fix[10] .* X[7,:] .* (1 .- X[3,:]) ./ (p_fix[15] .+ (1 .- X[3,:])))
-
-# Plot the simulated data, trained solution and ground truth ERK dynamics
-p1 = plot(X, color = :skyblue, linewidth=8, label = "ERK Ground truth", idxs=5)
-plot!(p1, ts, X̂[5,:], xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), color = :black, linewidth=2, label = "ERK Approximation (UDE)", title="Fitted ERK dynamics after $(GF) stimulation ($(CC) concentration))")
-scatter!(p1, time, xₙ_ERK, color = :darkorange, alpha=0.75, label = "Noisy ERK Data")
-
-# Plot unknown part approximated by NN with ground truth
-p2 = plot(ts, û[1,:], label="NN Unknown", linewidth=2, title="Unknown function approximated by NN", xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm),)
-plot!(p2, X.t, u, linewidth=2, label="Ground truth", legend_position=:bottomright)
-
-# Final two panels plot
-nn_plot = plot(p1, p2, layout=(2,1), size=(600, 800))
-#savefig(nn_plot, "./Plots/$(filename)_nn_plot.svg")
-
-
-# Plot UDE full results for all model species
-R_plot = plot(ts, X̂[1,:], label="Predicted", alpha = 0.25, color = :blue, linewidth=2, title="\nR", titlelocation=:left)
-plot!(X.t, X[1,:], label="Ground truth", linestyle=:dash, colour=:purple, linewidth=2, ylabel = "x(t)", left_margin=(7,:mm))
-
-Ras_plot = plot(ts, X̂[2,:], label="Predicted", colour=:lightgreen, linewidth=2, title="\nRas", titlelocation=:left)
-plot!(X.t, X[2,:], label="Ground truth", linestyle=:dash, colour=:green, linewidth=2)
-
-Raf_plot = plot(ts, X̂[3,:], label="Predicted", colour=:steelblue, alpha=0.75, linewidth=2, title="Raf", titlelocation=:left)
-plot!(X.t, X[3,:], label="Ground truth", linestyle=:dash, colour=:darkblue, linewidth=2, ylabel = "x(t)", left_margin=(7,:mm))
-
-MEK_plot = plot(ts, X̂[4,:], label="Predicted", colour=:yellow3, linewidth=2, title="MEK", titlelocation=:left)
-plot!(X.t, X[4,:], label="Ground truth", linestyle=:dash, colour=:orange, linewidth=2)
-
-ERK_plot = plot(ts, X̂[5,:], label="Predicted", colour=:blue, linewidth=2, title="ERK", titlelocation=:left)
-plot!(X.t, X[5,:], label="Ground truth", linestyle=:dash, colour=:darkblue, linewidth=2)
-
-NFB_plot = plot(ts, X̂[6,:], label="Predicted", colour=:lightpink, linewidth=2, title="NFB", titlelocation=:left)
-plot!(X.t, X[6,:], label="Ground truth", linestyle=:dash, colour=:red, linewidth=2, xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), legend_position=:bottomright)
-
-PFB_plot = plot(ts, X̂[7,:], label="Predicted", colour=:grey, linewidth=2, title="PFB", titlelocation=:left)
-plot!(X.t, X[7,:], label="Ground truth", colour=:black, linewidth=2, linestyle=:dash, legend_position=:bottomright, xlabel = "Time [min]")
-
-# Final multipanel plot
-full_plot = plot(R_plot, Ras_plot, Raf_plot, MEK_plot, NFB_plot, PFB_plot, layout=(3,2), size=(800, 1000))
-#savefig(full_plot, "./Plots/$(filename)_full_plot.svg")
-
-
-
-
-##### Save results #####
 
 # Save NN approximation with the fitted and GT ODE solution for equation discovery
 erk_data = zeros(length(û[1,:]))
@@ -367,3 +340,49 @@ df = DataFrame((
     NFB_GT=X[6,:],
     PFB_GT=X[7,:]))
 #CSV.write("./Data/$(filename).csv", df, header=true)
+
+
+
+
+##### Visualise results #####
+
+# Plot the simulated data, trained solution and ground truth ERK dynamics
+p1 = plot(X, color = :skyblue, linewidth=8, label = "ERK Ground truth", idxs=5)
+plot!(p1, ts, X̂[5,:], xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), color = :black, linewidth=2, label = "ERK Approximation (UDE)", title="Fitted ERK dynamics after $(GF) stimulation ($(CC) concentration))")
+scatter!(p1, time, xₙ_ERK, color = :darkorange, alpha=0.75, label = "Noisy ERK Data")
+
+# Plot unknown part approximated by NN with ground truth
+p2 = plot(ts, û[1,:], label="NN Unknown", linewidth=2, title="Unknown function approximated by NN", xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm),)
+plot!(p2, X.t, u, linewidth=2, label="Ground truth", legend_position=:bottomright)
+
+# Final two panels plot
+nn_plot = plot(p1, p2, layout=(2,1), size=(600, 800))
+#savefig(nn_plot, "./Plots/$(filename)_nn_plot.svg")
+
+
+
+# Plot UDE full results for all model species
+R_plot = plot(ts, X̂[1,:], label="Predicted", alpha = 0.25, color = :blue, linewidth=2, title="\nR", titlelocation=:left)
+plot!(X.t, X[1,:], label="Ground truth", linestyle=:dash, colour=:purple, linewidth=2, ylabel = "x(t)", left_margin=(7,:mm))
+
+Ras_plot = plot(ts, X̂[2,:], label="Predicted", colour=:lightgreen, linewidth=2, title="\nRas", titlelocation=:left)
+plot!(X.t, X[2,:], label="Ground truth", linestyle=:dash, colour=:green, linewidth=2)
+
+Raf_plot = plot(ts, X̂[3,:], label="Predicted", colour=:steelblue, alpha=0.75, linewidth=2, title="Raf", titlelocation=:left)
+plot!(X.t, X[3,:], label="Ground truth", linestyle=:dash, colour=:darkblue, linewidth=2, ylabel = "x(t)", left_margin=(7,:mm))
+
+MEK_plot = plot(ts, X̂[4,:], label="Predicted", colour=:yellow3, linewidth=2, title="MEK", titlelocation=:left)
+plot!(X.t, X[4,:], label="Ground truth", linestyle=:dash, colour=:orange, linewidth=2)
+
+ERK_plot = plot(ts, X̂[5,:], label="Predicted", colour=:blue, linewidth=2, title="ERK", titlelocation=:left)
+plot!(X.t, X[5,:], label="Ground truth", linestyle=:dash, colour=:darkblue, linewidth=2)
+
+NFB_plot = plot(ts, X̂[6,:], label="Predicted", colour=:lightpink, linewidth=2, title="NFB", titlelocation=:left)
+plot!(X.t, X[6,:], label="Ground truth", linestyle=:dash, colour=:red, linewidth=2, xlabel = "Time [min]", ylabel = "x(t)", left_margin=(7,:mm), legend_position=:bottomright)
+
+PFB_plot = plot(ts, X̂[7,:], label="Predicted", colour=:grey, linewidth=2, title="PFB", titlelocation=:left)
+plot!(X.t, X[7,:], label="Ground truth", colour=:black, linewidth=2, linestyle=:dash, legend_position=:bottomright, xlabel = "Time [min]")
+
+# Final multipanel plot
+full_plot = plot(R_plot, Ras_plot, Raf_plot, MEK_plot, NFB_plot, PFB_plot, layout=(3,2), size=(800, 1000))
+#savefig(full_plot, "./Plots/$(filename)_full_plot.svg")

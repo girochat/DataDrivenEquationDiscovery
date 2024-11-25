@@ -7,7 +7,7 @@ using Statistics, Plots, CSV, DataFrames
 # External libraries
 using HyperTuning, StableRNGs, Distributions, SmoothingSplines, ColorSchemes, JLD2
 
-# Packages under development (debugging)
+# Data Driven Equation Discovery packages
 using DataDrivenDiffEq, DataDrivenSparse
 
 # Set a random seed for reproducibility
@@ -65,12 +65,16 @@ i = collect(i)
 basis = build_basis(x[1:size(data.X, 2)], i)
 
 
-##### Run Library E-SINDy #####
-#lib_coefficients = library_bootstrap(data, basis, n_bstraps, 10)
-
 ##### Run E-SINDy (b(r)agging) #####
 esindy_res = esindy(data, basis, n_bstraps, coef_threshold=coef_threshold, data_fraction=1) 
+
+
+##### Run Library E-SINDy #####
+#lib_coefficients = library_bootstrap(data, basis, n_bstraps, 10, implicit_id=22)
+#lib_basis = ESINDyModule.build_basis(lib_coefficients, basis)
+#esindy_res = esindy(data, lib_basis, n_bstraps, coef_threshold=coef_threshold, data_fraction=1)
 #esindy_res = (esindy = esindy_res, esindy_lib = lib_coefficients)
+
 
 ##### Save results #####
 println("Saving results to ./Data/$(filename).jld2.")
