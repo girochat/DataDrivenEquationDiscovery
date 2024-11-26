@@ -9,7 +9,7 @@ To test the approach, two biological models were used to simulate data and build
 - the Negative FeedBack (NFB) model presented in Chapter 13: Parameter Estimation, Sloppiness, and Model Identifiability by D. Daniels, M. Dobrzyński, D. Fey in "Quantitative Biology: Theory, Computational Methods and Examples of Models" (2018).
 - the ERK signalling (ERK) model presented by Ryu et al. in "Frequency modulation of ERK activation dynamics rewires cell fate" (2015) [DOI](https://doi.org/10.15252/msb.20156458).
 
-Here are the schematics of the two models:
+The goal of the method would typically be to identify some feedback mechanisms that are part of the dynamics using a measurable variable of the system. Here are the schematics of the two models where g2p, resp. ERK are the observed variables:  
 
 <p align="center">
 <img width="849" alt="models_schematics" src="https://github.com/user-attachments/assets/50b76b27-c814-4a46-8e05-77bd4c95f4fd">
@@ -44,7 +44,7 @@ For the second part, the function(s) represented by the neural network are fed i
 <img width="871" alt="ude_optimisation" src="https://github.com/user-attachments/assets/0387759a-9272-4a3f-b983-694194b6fce3">
 </p>
 
-The purpose is to gain insights about the signaling mechanisms in a data-driven manner while incorporating some prior knowledge about the system.
+The purpose is to gain insights about the signalling mechanisms in a data-driven manner while incorporating some prior knowledge about the system.
 
 ## Project Structure
 
@@ -67,11 +67,14 @@ This repository contains three main directories:
   - UDE approximation:  
        Pluto notebook: `<model_name>_ude_approximation_pluto.jl`  
        Jupyter notebook: `<model_name>_ude_approximation.ipynb`  
-       Julia script: `<model_name>_ude_approximation.jl`
-   - E-SINDy:
+       Julia script: `<model_name>_ude_approximation.jl`  
+   - E-SINDy:  
        Pluto notebook: `<model_name>_esindy_pluto.jl`  
        Jupyter notebook: `<model_name>_esindy.ipynb`  
        Julia script: `esindy.jl` and `esindy_utils.jl`  
+     **Note**: the Julia script `esindy_utils.jl` contains all the utility functions that are used to run the equation discovery part, while the script
+     `esindy.jl` allows to run the algorithm.
+     
      
 - **Data**:  
   Final and intermediate results (CSV and JDL2 files) that were obtained for the two considered ODE systems, i.e. NFB and ERK model.
